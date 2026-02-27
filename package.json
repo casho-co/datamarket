@@ -12,6 +12,7 @@
     "@aws-sdk/client-s3": "^3.992.0",
     "@aws-sdk/s3-request-presigner": "^3.992.0",
     "@neondatabase/serverless": "^1.0.2",
+    "@privy-io/react-auth": "^3.14.1",
     "@privy-io/server-auth": "^1.32.5",
     "@upstash/ratelimit": "^2.0.8",
     "@upstash/redis": "^1.36.2",

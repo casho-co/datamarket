@@ -229,25 +229,11 @@ export const apiKeys = pgTable(
 );
 
 // ═══════════════════════════════════════════════
-// 3. Agent Wallets (Internal Ledger)
+// 3. Agent Wallets — DEPRECATED
+// Agents now hold USDC in their own BSC wallets.
+// Balance is read on-chain via getUSDCBalance().
+// This table is kept for historical reference only.
 // ═══════════════════════════════════════════════
-
-export const agentWallets = pgTable("agent_wallets", {
-  agentId: uuid("agent_id")
-    .references(() => agents.id, { onDelete: "cascade" })
-    .primaryKey(),
-  balance: varchar("balance", { length: 50 }).default("0").notNull(),
-  totalDeposited: varchar("total_deposited", { length: 50 })
-    .default("0")
-    .notNull(),
-  totalEarned: varchar("total_earned", { length: 50 })
-    .default("0")
-    .notNull(),
-  totalWithdrawn: varchar("total_withdrawn", { length: 50 })
-    .default("0")
-    .notNull(),
-  updatedAt: timestamp("updated_at").defaultNow().notNull(),
-});
 
 // ═══════════════════════════════════════════════
 // 4. Jobs (Standard Bid-Based)
@@ -1223,6 +1209,55 @@ export const lifiBridgeTransactions = pgTable(
 );
 
 // ═══════════════════════════════════════════════
+// 35. Token Launches (Four.meme)
+// ═══════════════════════════════════════════════
+
+export const tokenLaunchStatusEnum = pgEnum("token_launch_status", [
+  "pending",
+  "launched",
+  "failed",
+]);
+
+export const tokenLaunches = pgTable(
+  "token_launches",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    agentId: uuid("agent_id")
+      .references(() => agents.id, { onDelete: "cascade" })
+      .notNull(),
+    name: varchar("name", { length: 100 }).notNull(),
+    symbol: varchar("symbol", { length: 20 }).notNull(),
+    description: text("description").notNull(),
+    imageUrl: varchar("image_url", { length: 512 }),
+    tokenAddress: varchar("token_address", { length: 42 }),
+    fourMemeTokenId: varchar("four_meme_token_id", { length: 100 }),
+    txHash: varchar("tx_hash", { length: 66 }),
+    totalSupply: varchar("total_supply", { length: 50 })
+      .default("1000000000")
+      .notNull(),
+    raisedAmount: varchar("raised_amount", { length: 50 })
+      .default("24")
+      .notNull(),
+    initialBuyBnb: varchar("initial_buy_bnb", { length: 50 })
+      .default("0")
+      .notNull(),
+    label: varchar("label", { length: 50 }).default("Meme"),
+    webUrl: varchar("web_url", { length: 512 }),
+    twitterUrl: varchar("twitter_url", { length: 512 }),
+    telegramUrl: varchar("telegram_url", { length: 512 }),
+    status: tokenLaunchStatusEnum("status").default("pending").notNull(),
+    errorMessage: text("error_message"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+    launchedAt: timestamp("launched_at"),
+  },
+  (table) => [
+    index("idx_token_launches_agent").on(table.agentId),
+    index("idx_token_launches_status").on(table.status),
+    index("idx_token_launches_token_address").on(table.tokenAddress),
+  ]
+);
+
+// ═══════════════════════════════════════════════
 // Type Exports
 // ═══════════════════════════════════════════════
 
@@ -1230,7 +1265,6 @@ export type Agent = typeof agents.$inferSelect;
 export type NewAgent = typeof agents.$inferInsert;
 export type ApiKey = typeof apiKeys.$inferSelect;
 export type NewApiKey = typeof apiKeys.$inferInsert;
-export type AgentWallet = typeof agentWallets.$inferSelect;
 export type Job = typeof jobs.$inferSelect;
 export type NewJob = typeof jobs.$inferInsert;
 export type Bid = typeof bids.$inferSelect;
@@ -1268,3 +1302,5 @@ export type EscrowMilestone = typeof escrowMilestones.$inferSelect;
 export type AgentDelegation = typeof agentDelegations.$inferSelect;
 export type LifiBridgeTransaction = typeof lifiBridgeTransactions.$inferSelect;
 export type Conversation = typeof conversations.$inferSelect;
+export type TokenLaunch = typeof tokenLaunches.$inferSelect;
+export type NewTokenLaunch = typeof tokenLaunches.$inferInsert;

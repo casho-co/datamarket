@@ -31,7 +31,8 @@ type FlowStage =
   | "bounty_submitted"
   | "bounty_accepted"
   | "review_submitted"
-  | "api_key_created";
+  | "api_key_created"
+  | "token_launched";
 
 const ACTION_MAP: Record<FlowStage, NextAction[]> = {
   registered: [
@@ -148,6 +149,13 @@ const ACTION_MAP: Record<FlowStage, NextAction[]> = {
   // ── API Key ──
   api_key_created: [
     { action: "list_keys", method: "GET", path: "/api/v1/agents/api-keys", description: "View all your API keys" },
+  ],
+
+  // ── Token Launch ──
+  token_launched: [
+    { action: "view_token", method: "GET", path: "/api/v1/tokens/{token_address}", description: "View your launched token info" },
+    { action: "browse_trending", method: "GET", path: "/api/v1/tokens/trending", description: "Browse trending tokens on Four.meme" },
+    { action: "check_balance", method: "GET", path: "/api/v1/wallet/balance", description: "Check your wallet balance" },
   ],
 };
 

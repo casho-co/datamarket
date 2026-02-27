@@ -1,6 +1,5 @@
 import { db } from "@/lib/db";
 import {
-  agentWallets,
   jobs,
   tasks,
   gigOrders,
@@ -11,13 +10,11 @@ import {
   escrows,
 } from "@/lib/db/schema";
 import { eq, and, sql, gte } from "drizzle-orm";
+import { getAgentBalance } from "./wallet";
 
 export async function getAgentAnalytics(agentId: string) {
-  // Earnings breakdown
-  const [wallet] = await db
-    .select()
-    .from(agentWallets)
-    .where(eq(agentWallets.agentId, agentId));
+  // On-chain balance
+  const balance = await getAgentBalance(agentId);
 
   const [rep] = await db
     .select()
@@ -96,10 +93,8 @@ export async function getAgentAnalytics(agentId: string) {
 
   return {
     wallet: {
-      balance: wallet?.balance || "0",
-      total_deposited: wallet?.totalDeposited || "0",
-      total_earned: wallet?.totalEarned || "0",
-      total_withdrawn: wallet?.totalWithdrawn || "0",
+      balance,
+      total_earned: rep?.totalEarned || "0",
     },
     reputation: {
       score: rep?.score || 0,

@@ -1,15 +1,19 @@
 import { db } from "@/lib/db";
-import { agents, reputation, agentWallets, apiKeys } from "@/lib/db/schema";
+import { agents, reputation, apiKeys } from "@/lib/db/schema";
 import { eq, ilike, or, desc, sql, and, type SQL } from "drizzle-orm";
 import {
   generateApiKey,
   hashApiKey,
   createApiKeyForAgent,
 } from "@/lib/auth/api-key";
-import { registerAgentOnChain } from "@/lib/bsc/erc8004";
+import {
+  registerAgentOnChain,
+  setAgentWalletOnChain,
+  getOnChainReputation,
+} from "@/lib/bsc/erc8004";
 import { verifyPrivyToken, getPrivyUserWallet } from "@/lib/auth/privy";
 import { DEFAULT_SCOPES } from "@/lib/auth/scopes";
-import { initWallet } from "./wallet";
+import { getAgentBalance } from "./wallet";
 import { initReputation, getTierForScore } from "./reputation";
 
 const UUID_RE =
@@ -18,6 +22,35 @@ const UUID_RE =
 function agentLookupCondition(identifier: string): SQL {
   if (UUID_RE.test(identifier)) return eq(agents.id, identifier);
   return eq(agents.handle, identifier);
+}
+
+// ── ERC-8004 On-Chain Registration Helper ──
+
+async function registerAndLinkOnChain(
+  handle: string | null | undefined,
+  walletAddress: string | null | undefined
+): Promise<bigint | null> {
+  try {
+    const baseUrl =
+      process.env.NEXT_PUBLIC_BASE_URL || "https://datalayer-market.fly.dev";
+    const identifier = handle || walletAddress || "agent";
+    const agentURI = `${baseUrl}/api/v1/agents/${identifier}`;
+    const erc8004AgentId = await registerAgentOnChain(agentURI);
+
+    // Link the agent's wallet address on-chain so other platforms can discover it
+    if (walletAddress && erc8004AgentId) {
+      try {
+        await setAgentWalletOnChain(erc8004AgentId, walletAddress);
+      } catch {
+        // setAgentWallet is best-effort — registration still succeeded
+      }
+    }
+
+    return erc8004AgentId;
+  } catch {
+    // On-chain registration may fail; continue with off-chain only
+    return null;
+  }
 }
 
 // ── Registration (Dual-Mode) ──
@@ -37,16 +70,11 @@ export async function registerNonCustodialAgent(params: {
   const { key, prefix } = generateApiKey();
   const hash = await hashApiKey(key);
 
-  // Register on-chain with ERC-8004
-  let erc8004AgentId: bigint | null = null;
-  try {
-    const baseUrl =
-      process.env.NEXT_PUBLIC_BASE_URL || "https://datalayer-market.fly.dev";
-    const agentURI = `${baseUrl}/api/v1/agents/${params.handle || params.walletAddress}`;
-    erc8004AgentId = await registerAgentOnChain(agentURI);
-  } catch {
-    // On-chain registration may fail; continue
-  }
+  // Register on-chain with ERC-8004 + link wallet
+  const erc8004AgentId = await registerAndLinkOnChain(
+    params.handle,
+    params.walletAddress
+  );
 
   const [agent] = await db
     .insert(agents)
@@ -73,7 +101,6 @@ export async function registerNonCustodialAgent(params: {
     scopes: [...DEFAULT_SCOPES],
   });
 
-  await initWallet(agent.id);
   await initReputation(agent.id);
 
   return {
@@ -120,6 +147,13 @@ export async function registerCustodialAgent(params: {
   const { key, prefix } = generateApiKey();
   const hash = await hashApiKey(key);
 
+  // Register custodial agents on-chain too — they need ERC-8004 identity
+  // for cross-platform reputation and discoverability
+  const erc8004AgentId = await registerAndLinkOnChain(
+    params.handle,
+    walletAddress
+  );
+
   const [agent] = await db
     .insert(agents)
     .values({
@@ -137,6 +171,7 @@ export async function registerCustodialAgent(params: {
       mcpEndpoint: params.mcpEndpoint || null,
       apiKeyHash: hash,
       apiKeyPrefix: prefix,
+      erc8004AgentId,
     })
     .returning();
 
@@ -145,7 +180,6 @@ export async function registerCustodialAgent(params: {
     scopes: [...DEFAULT_SCOPES],
   });
 
-  await initWallet(agent.id);
   await initReputation(agent.id);
 
   return {
@@ -154,6 +188,7 @@ export async function registerCustodialAgent(params: {
     apiKeyPrefix: apiKeyResult.prefix,
     walletAddress: agent.walletAddress,
     walletMode: agent.walletMode,
+    erc8004AgentId: erc8004AgentId?.toString() || null,
     privyUserId: privyId,
     handle: agent.handle,
   };
@@ -197,16 +232,33 @@ export async function getAgentPublicProfile(identifier: string) {
     .from(reputation)
     .where(eq(reputation.agentId, agent.id));
 
-  const [wallet] = await db
-    .select({
-      balance: agentWallets.balance,
-      totalEarned: agentWallets.totalEarned,
-    })
-    .from(agentWallets)
-    .where(eq(agentWallets.agentId, agent.id));
+  // Read on-chain USDC balance
+  const balance = await getAgentBalance(agent.id);
 
   const score = rep?.score ?? 0;
   const tierInfo = getTierForScore(score);
+
+  // Read on-chain ERC-8004 reputation (best-effort)
+  let onChainReputation: {
+    feedback_count: string;
+    avg_score: string;
+    decimals: number;
+  } | null = null;
+
+  if (agent.erc8004AgentId) {
+    try {
+      const onChain = await getOnChainReputation(agent.erc8004AgentId);
+      if (onChain) {
+        onChainReputation = {
+          feedback_count: onChain.count.toString(),
+          avg_score: onChain.value.toString(),
+          decimals: onChain.decimals,
+        };
+      }
+    } catch {
+      // On-chain read is best-effort
+    }
+  }
 
   return {
     ...agent,
@@ -226,8 +278,9 @@ export async function getAgentPublicProfile(identifier: string) {
           totalReviews: rep.totalReviews,
         }
       : null,
-    balance: wallet?.balance || "0",
-    totalEarned: wallet?.totalEarned || "0",
+    onChainReputation,
+    balance,
+    totalEarned: rep?.totalEarned || "0",
   };
 }
 

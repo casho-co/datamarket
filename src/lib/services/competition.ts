@@ -2,15 +2,15 @@ import { db, withTransaction, type TX } from "@/lib/db";
 import {
   competitionEntries,
   jobs,
-  agentWallets,
   agents,
   escrows,
 } from "@/lib/db/schema";
-import { eq, desc, sql, and } from "drizzle-orm";
+import { eq, desc } from "drizzle-orm";
+import { checkSufficientBalance } from "./wallet";
 import { emitFeedEvent } from "./feed";
 import { validateJobTransition } from "./state-machine";
 import {
-  oracleCreateEscrow,
+  agentCreateEscrow,
   oracleRelease,
 } from "@/lib/bsc/escrow-contract";
 import {
@@ -86,24 +86,9 @@ export async function resolveCompetition(params: {
 
     const totalDistributed = (budgetAmount * totalBps) / 10000;
 
-    // Atomically debit the creator's balance to reserve prize funds
-    const [debitResult] = await tx
-      .update(agentWallets)
-      .set({
-        balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) - ${totalDistributed})::TEXT`,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(agentWallets.agentId, params.judgeAgentId),
-          sql`CAST(${agentWallets.balance} AS DECIMAL) >= ${totalDistributed}`
-        )
-      )
-      .returning({ agentId: agentWallets.agentId });
-
-    if (!debitResult) {
-      throw new Error("Insufficient balance to fund prizes");
-    }
+    // Verify creator has sufficient on-chain USDC balance
+    const hasFunds = await checkSufficientBalance(params.judgeAgentId, totalDistributed.toString());
+    if (!hasFunds) throw new Error("Insufficient on-chain USDC balance to fund prizes");
 
     for (const prize of params.prizes) {
       const [entry] = await tx
@@ -122,7 +107,7 @@ export async function resolveCompetition(params: {
       // Create on-chain escrow and immediately release to winner
       if (ESCROW_CONTRACT_ADDRESS && prizeAmount > 0) {
         const [funder] = await tx
-          .select({ walletAddress: agents.walletAddress })
+          .select({ walletAddress: agents.walletAddress, walletMode: agents.walletMode })
           .from(agents)
           .where(eq(agents.id, params.judgeAgentId));
         const [recipient] = await tx
@@ -132,7 +117,7 @@ export async function resolveCompetition(params: {
 
         if (funder?.walletAddress && recipient?.walletAddress) {
           try {
-            // Create escrow
+            // Create escrow DB record
             const [escrow] = await tx
               .insert(escrows)
               .values({
@@ -143,9 +128,11 @@ export async function resolveCompetition(params: {
               })
               .returning();
 
-            const createTxHash = await oracleCreateEscrow({
+            // Create on-chain escrow from agent's own wallet
+            const escrowResult = await agentCreateEscrow({
+              walletMode: funder.walletMode as "custodial" | "non_custodial",
+              walletAddress: funder.walletAddress,
               escrowId: escrow.id,
-              buyerAddress: funder.walletAddress,
               sellerAddress: recipient.walletAddress,
               token: "USDC",
               amount: prizeAmount.toFixed(6),
@@ -153,37 +140,32 @@ export async function resolveCompetition(params: {
               disputeWindowHours: DEFAULT_DISPUTE_WINDOW_HOURS,
             });
 
-            await tx
-              .update(escrows)
-              .set({ onChainTxHash: createTxHash })
-              .where(eq(escrows.id, escrow.id));
+            if (escrowResult.txHash) {
+              await tx
+                .update(escrows)
+                .set({ onChainTxHash: escrowResult.txHash })
+                .where(eq(escrows.id, escrow.id));
 
-            // Immediately release to winner
-            const releaseTxHash = await oracleRelease(escrow.id);
+              // Immediately release to winner
+              const releaseTxHash = await oracleRelease(escrow.id);
 
-            await tx
-              .update(escrows)
-              .set({
-                status: "released",
-                releasedAt: new Date(),
-                releaseTxHash,
-              })
-              .where(eq(escrows.id, escrow.id));
+              await tx
+                .update(escrows)
+                .set({
+                  status: "released",
+                  releasedAt: new Date(),
+                  releaseTxHash,
+                })
+                .where(eq(escrows.id, escrow.id));
 
-            // Track on the entry
-            await tx
-              .update(competitionEntries)
-              .set({ escrowId: escrow.id, releaseTxHash })
-              .where(eq(competitionEntries.id, prize.entryId));
+              // Track on the entry
+              await tx
+                .update(competitionEntries)
+                .set({ escrowId: escrow.id, releaseTxHash })
+                .where(eq(competitionEntries.id, prize.entryId));
+            }
           } catch {
-            // On-chain payment failed for this winner — re-credit balance
-            await tx
-              .update(agentWallets)
-              .set({
-                balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) + ${prizeAmount})::TEXT`,
-                updatedAt: new Date(),
-              })
-              .where(eq(agentWallets.agentId, params.judgeAgentId));
+            // On-chain payment failed for this winner — no off-chain balance to restore
           }
         }
       }

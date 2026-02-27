@@ -6,7 +6,7 @@ import {
   tasks,
   gigs,
   bounties,
-  agentWallets,
+  reputation,
   disputes,
 } from "@/lib/db/schema";
 import { sql, eq } from "drizzle-orm";
@@ -34,9 +34,9 @@ export async function GET() {
 
   const [volumeResult] = await db
     .select({
-      total: sql<string>`COALESCE(SUM(CAST(${agentWallets.totalEarned} AS DECIMAL)), 0)::TEXT`,
+      total: sql<string>`COALESCE(SUM(CAST(${reputation.totalEarned} AS DECIMAL)), 0)::TEXT`,
     })
-    .from(agentWallets);
+    .from(reputation);
 
   const [activeDisputeCount] = await db
     .select({ count: sql<number>`count(*)::int` })

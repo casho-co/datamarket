@@ -147,7 +147,7 @@ export const createJobSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().min(1).max(50000),
   tags: z.array(z.string().max(50)).max(20).optional(),
-  budget_amount: amountString.optional(),
+  budget_amount: amountString,
   job_type: z.enum(["standard", "competition"]).default("standard"),
   max_slots: z.coerce.number().int().min(1).max(100).default(1),
   deadline_seconds: z.coerce
@@ -465,6 +465,61 @@ export const updateJobTemplateSchema = z.object({
   max_slots: z.coerce.number().int().min(1).max(100).optional(),
   deadline_seconds: z.coerce.number().int().min(3600).max(604800).optional(),
   requires_verifiable: z.boolean().optional(),
+});
+
+// ═══════════════════════════════════════════════
+// Token Launch Schemas (Four.meme)
+// ═══════════════════════════════════════════════
+
+export const launchTokenSchema = z.object({
+  name: z.string().min(1).max(100),
+  symbol: z.string().min(1).max(20),
+  description: z.string().min(1).max(5000),
+  image_url: z.string().url().max(512).optional(),
+  total_supply: z.coerce.number().int().min(1).max(100_000_000_000).default(1_000_000_000),
+  raised_amount: z.coerce.number().min(1).max(1000).default(24),
+  initial_buy_bnb: z.string().regex(/^\d+(\.\d{1,18})?$/, "Invalid BNB amount").default("0"),
+  label: z.string().max(50).default("Meme"),
+  web_url: z.string().url().max(512).optional(),
+  twitter_url: z.string().url().max(512).optional(),
+  telegram_url: z.string().url().max(512).optional(),
+});
+
+// ═══════════════════════════════════════════════
+// Token Buy / Sell Schemas (Four.meme Bonding Curve)
+// ═══════════════════════════════════════════════
+
+export const buyTokenSchema = z.object({
+  token_address: bscAddress,
+  amount_bnb: z.string().regex(/^\d+(\.\d{1,18})?$/, "Invalid BNB amount"),
+  min_tokens: z.string().regex(/^\d+(\.\d{1,18})?$/, "Invalid token amount").optional(),
+});
+
+export const sellTokenSchema = z.object({
+  token_address: bscAddress,
+  token_amount: z.string().regex(/^\d+(\.\d{1,18})?$/, "Invalid token amount"),
+});
+
+// ═══════════════════════════════════════════════
+// Swap Schemas (LiFi — PancakeSwap / DEX)
+// ═══════════════════════════════════════════════
+
+export const swapQuoteSchema = z.object({
+  from_token: z.string().min(1).max(42),
+  to_token: z.string().min(1).max(42),
+  amount: z.string().regex(/^\d+(\.\d{1,18})?$/, "Invalid amount"),
+  from_chain: z.string().max(20).default("bsc"),
+  to_chain: z.string().max(20).default("bsc"),
+  slippage: z.coerce.number().min(0.001).max(0.5).default(0.05),
+});
+
+export const swapExecuteSchema = z.object({
+  from_token: z.string().min(1).max(42),
+  to_token: z.string().min(1).max(42),
+  amount: z.string().regex(/^\d+(\.\d{1,18})?$/, "Invalid amount"),
+  from_chain: z.string().max(20).default("bsc"),
+  to_chain: z.string().max(20).default("bsc"),
+  slippage: z.coerce.number().min(0.001).max(0.5).default(0.05),
 });
 
 // ═══════════════════════════════════════════════

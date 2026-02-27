@@ -4,17 +4,18 @@ import {
   gigOrders,
   escrows,
   agents,
-  agentWallets,
   reputation,
   submissionHistory,
   fileUploads,
 } from "@/lib/db/schema";
 import { eq, and, sql, desc, ilike, or } from "drizzle-orm";
+import { checkSufficientBalance } from "./wallet";
 import { validateGigOrderTransition, validateEscrowTransition } from "./state-machine";
 import { emitFeedEvent } from "./feed";
 import { updateReputation } from "./reputation";
+import { giveOnChainFeedback } from "@/lib/bsc/erc8004";
 import {
-  oracleCreateEscrow,
+  agentCreateEscrow,
   oracleRelease as onChainRelease,
   oracleRefund as onChainRefund,
 } from "@/lib/bsc/escrow-contract";
@@ -109,24 +110,9 @@ export async function orderGig(params: {
       throw new Error("Seller has reached max active orders for this gig");
     }
 
-    const amount = parseFloat(gig.price);
-
-    // Debit buyer
-    const [debitResult] = await tx
-      .update(agentWallets)
-      .set({
-        balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) - ${amount})::TEXT`,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(agentWallets.agentId, params.buyerAgentId),
-          sql`CAST(${agentWallets.balance} AS DECIMAL) >= ${amount}`
-        )
-      )
-      .returning({ agentId: agentWallets.agentId });
-
-    if (!debitResult) throw new Error("Insufficient balance");
+    // Verify buyer has sufficient on-chain USDC balance
+    const hasFunds = await checkSufficientBalance(params.buyerAgentId, gig.price);
+    if (!hasFunds) throw new Error("Insufficient on-chain USDC balance");
 
     // Create escrow (on-chain)
     const [escrow] = await tx
@@ -174,10 +160,10 @@ export async function orderGig(params: {
     return { order, escrow, sellerAgentId: gig.sellerAgentId, price: gig.price };
   });
 
-  // Lock funds on-chain via smart contract
+  // Create on-chain escrow from buyer's own wallet
   if (ESCROW_CONTRACT_ADDRESS && result.escrow) {
     const [funder] = await db
-      .select({ walletAddress: agents.walletAddress })
+      .select({ walletAddress: agents.walletAddress, walletMode: agents.walletMode })
       .from(agents)
       .where(eq(agents.id, params.buyerAgentId));
     const [recipient] = await db
@@ -187,29 +173,24 @@ export async function orderGig(params: {
 
     if (funder?.walletAddress && recipient?.walletAddress) {
       try {
-        const txHash = await oracleCreateEscrow({
+        const escrowResult = await agentCreateEscrow({
+          walletMode: funder.walletMode as "custodial" | "non_custodial",
+          walletAddress: funder.walletAddress,
           escrowId: result.escrow.id,
-          buyerAddress: funder.walletAddress,
           sellerAddress: recipient.walletAddress,
           token: "USDC",
           amount: result.price,
           deadlineHours: DEFAULT_DEADLINE_HOURS,
           disputeWindowHours: DEFAULT_DISPUTE_WINDOW_HOURS,
         });
-        await db
-          .update(escrows)
-          .set({ onChainTxHash: txHash })
-          .where(eq(escrows.id, result.escrow.id));
+        if (escrowResult.txHash) {
+          await db
+            .update(escrows)
+            .set({ onChainTxHash: escrowResult.txHash })
+            .where(eq(escrows.id, result.escrow.id));
+        }
       } catch {
-        // Rollback: delete escrow and re-credit balance
         await db.delete(escrows).where(eq(escrows.id, result.escrow.id));
-        await db
-          .update(agentWallets)
-          .set({
-            balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) + ${parseFloat(result.price)})::TEXT`,
-            updatedAt: new Date(),
-          })
-          .where(eq(agentWallets.agentId, params.buyerAgentId));
         throw new Error("Failed to create on-chain escrow");
       }
     }
@@ -349,6 +330,28 @@ export async function acceptGigDelivery(params: {
   });
 
   await updateReputation(result.order.sellerAgentId);
+
+  // On-chain reputation feedback for gig completion
+  try {
+    const [seller] = await db
+      .select({ erc8004AgentId: agents.erc8004AgentId, mcpEndpoint: agents.mcpEndpoint })
+      .from(agents)
+      .where(eq(agents.id, result.order.sellerAgentId));
+    if (seller?.erc8004AgentId) {
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://datalayer-market.fly.dev";
+      await giveOnChainFeedback({
+        agentId: seller.erc8004AgentId,
+        value: 100,
+        tag1: "gig",
+        tag2: "completed",
+        feedbackURI: `${baseUrl}/api/v1/gigs/orders/${params.orderId}`,
+        endpoint: seller.mcpEndpoint || "",
+      });
+    }
+  } catch {
+    // On-chain feedback is best-effort
+  }
+
   return { success: true };
 }
 

@@ -12,7 +12,7 @@ import {
   PLATFORM_BSC_ADDRESS,
   type SupportedToken,
 } from "@/lib/bsc/constants";
-import { creditBalance } from "@/lib/services/wallet";
+// Note: creditBalance removed — agents hold USDC in their own wallets
 
 const LIFI_HEADERS: Record<string, string> = {
   "Content-Type": "application/json",
@@ -145,8 +145,7 @@ export async function confirmCrossChainDeposit(depositId: string) {
     .set({ status: "confirmed", confirmedAt: new Date() })
     .where(eq(crossChainDeposits.id, depositId));
 
-  // Credit agent's balance
-  await creditBalance(deposit.agentId, deposit.amount);
+  // No off-chain balance to credit — bridge funds arrive directly in agent's wallet on BSC
 
   // Update LiFi transaction
   await db

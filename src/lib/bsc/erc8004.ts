@@ -6,7 +6,7 @@ import {
   ERC8004_REPUTATION_REGISTRY,
 } from "./constants";
 
-// Minimal ABIs for the functions we need
+// ── ABIs ──
 
 const IDENTITY_REGISTRY_ABI = [
   {
@@ -41,6 +41,17 @@ const IDENTITY_REGISTRY_ABI = [
     outputs: [{ name: "agentId", type: "uint256" }],
   },
   {
+    name: "setMetadata",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "agentId", type: "uint256" },
+      { name: "metadataKey", type: "string" },
+      { name: "metadataValue", type: "bytes" },
+    ],
+    outputs: [],
+  },
+  {
     name: "ownerOf",
     type: "function",
     stateMutability: "view",
@@ -67,6 +78,26 @@ const IDENTITY_REGISTRY_ABI = [
     stateMutability: "view",
     inputs: [{ name: "owner", type: "address" }],
     outputs: [{ name: "", type: "uint256" }],
+  },
+  // Registered event for parsing agentId from logs
+  {
+    name: "Registered",
+    type: "event",
+    inputs: [
+      { name: "agentId", type: "uint256", indexed: true },
+      { name: "agentURI", type: "string", indexed: false },
+      { name: "owner", type: "address", indexed: true },
+    ],
+  },
+  // ERC-721 Transfer event
+  {
+    name: "Transfer",
+    type: "event",
+    inputs: [
+      { name: "from", type: "address", indexed: true },
+      { name: "to", type: "address", indexed: true },
+      { name: "tokenId", type: "uint256", indexed: true },
+    ],
   },
 ] as const;
 
@@ -103,7 +134,20 @@ const REPUTATION_REGISTRY_ABI = [
       { name: "summaryValueDecimals", type: "uint8" },
     ],
   },
+  {
+    name: "getClients",
+    type: "function",
+    stateMutability: "view",
+    inputs: [{ name: "agentId", type: "uint256" }],
+    outputs: [{ name: "", type: "address[]" }],
+  },
 ] as const;
+
+// ERC-721 Transfer event topic (keccak256 of "Transfer(address,address,uint256)")
+const TRANSFER_EVENT_TOPIC =
+  "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" as const;
+
+// ── Registration ──
 
 export async function registerAgentOnChain(
   agentURI: string
@@ -123,31 +167,63 @@ export async function registerAgentOnChain(
   const client = getPublicClient();
   const receipt = await client.waitForTransactionReceipt({ hash });
 
-  // Parse Registered event to get agentId
-  const registeredTopic =
-    "0x" + "Registered".padEnd(64, "0"); // Not exact, parse from logs
+  // Parse the ERC-721 Transfer event to get the minted tokenId.
+  // Transfer(from=0x0, to=owner, tokenId) is emitted on mint.
   const transferLog = receipt.logs.find(
     (log) =>
       log.address.toLowerCase() ===
-      ERC8004_IDENTITY_REGISTRY.toLowerCase() &&
-      log.topics[0] ===
-        "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"
+        ERC8004_IDENTITY_REGISTRY.toLowerCase() &&
+      log.topics[0] === TRANSFER_EVENT_TOPIC &&
+      // from = address(0) indicates a mint
+      log.topics[1] ===
+        "0x0000000000000000000000000000000000000000000000000000000000000000"
   );
 
   if (transferLog && transferLog.topics[3]) {
     return BigInt(transferLog.topics[3]);
   }
 
-  // Fallback: get balance - 1 as the latest token ID
-  const balance = await client.readContract({
+  throw new Error(
+    "Failed to parse agent ID from registration transaction — Transfer event not found"
+  );
+}
+
+// ── Set Agent Wallet On-Chain ──
+
+/**
+ * Link an agent's wallet address on-chain using the metadata key "agentWallet".
+ * This allows other platforms to discover where to send payments to this agent.
+ *
+ * Note: The full ERC-8004 setAgentWallet() requires an EIP-712 signature from
+ * the new wallet. We use setMetadata() with the "agentWallet" key instead,
+ * which the platform (as NFT owner) can call directly.
+ */
+export async function setAgentWalletOnChain(
+  agentId: bigint,
+  walletAddress: string
+): Promise<string> {
+  const walletClient = getWalletClient();
+  const account = getPlatformAccount();
+
+  // Encode address as bytes (ABI-encoded address = 32 bytes, left-padded)
+  const encodedWallet = ("0x" +
+    walletAddress.slice(2).toLowerCase().padStart(64, "0")) as Hex;
+
+  const hash = await walletClient.writeContract({
     address: ERC8004_IDENTITY_REGISTRY as Hex,
     abi: IDENTITY_REGISTRY_ABI,
-    functionName: "balanceOf",
-    args: [account.address],
+    functionName: "setMetadata",
+    args: [agentId, "agentWallet", encodedWallet],
+    account,
+    chain: bsc,
   });
 
-  return balance as bigint;
+  const client = getPublicClient();
+  await client.waitForTransactionReceipt({ hash });
+  return hash;
 }
+
+// ── Read Agent Info ──
 
 export async function getAgentOnChainInfo(agentId: bigint): Promise<{
   owner: string;
@@ -186,12 +262,26 @@ export async function getAgentOnChainInfo(agentId: bigint): Promise<{
   }
 }
 
-export async function giveOnChainFeedback(
-  agentId: bigint,
-  value: number,
-  tag1: string,
-  tag2: string
-): Promise<string> {
+// ── Feedback ──
+
+/**
+ * Give on-chain reputation feedback for an agent.
+ *
+ * @param agentId - The on-chain ERC-8004 agent ID (uint256)
+ * @param value - Feedback score (0-100 scale, or negative for penalties)
+ * @param tag1 - Category: "job", "bounty", "task", "gig", "dispute"
+ * @param tag2 - Outcome: "completed", "late", "lost", "abandoned"
+ * @param feedbackURI - URL to the resource for verification (e.g., job/bounty page)
+ * @param endpoint - Agent's API endpoint for discoverability
+ */
+export async function giveOnChainFeedback(params: {
+  agentId: bigint;
+  value: number;
+  tag1: string;
+  tag2: string;
+  feedbackURI?: string;
+  endpoint?: string;
+}): Promise<string> {
   const walletClient = getWalletClient();
   const account = getPlatformAccount();
 
@@ -200,14 +290,14 @@ export async function giveOnChainFeedback(
     abi: REPUTATION_REGISTRY_ABI,
     functionName: "giveFeedback",
     args: [
-      agentId,
-      BigInt(value),
-      0, // valueDecimals
-      tag1,
-      tag2,
-      "", // endpoint
-      "", // feedbackURI
-      "0x0000000000000000000000000000000000000000000000000000000000000000" as Hex, // feedbackHash
+      params.agentId,
+      BigInt(params.value),
+      0, // valueDecimals (whole numbers on 0-100 scale)
+      params.tag1,
+      params.tag2,
+      params.endpoint || "",
+      params.feedbackURI || "",
+      "0x0000000000000000000000000000000000000000000000000000000000000000" as Hex,
     ],
     account,
     chain: bsc,
@@ -218,16 +308,41 @@ export async function giveOnChainFeedback(
   return hash;
 }
 
+// ── Read Reputation ──
+
+/**
+ * Get on-chain reputation summary for an agent.
+ * First fetches all client addresses that have given feedback,
+ * then calls getSummary() with those addresses (required for Sybil protection).
+ */
 export async function getOnChainReputation(
   agentId: bigint
-): Promise<{ count: bigint; value: bigint; decimals: number }> {
+): Promise<{ count: bigint; value: bigint; decimals: number } | null> {
   const client = getPublicClient();
-  const result = await client.readContract({
-    address: ERC8004_REPUTATION_REGISTRY as Hex,
-    abi: REPUTATION_REGISTRY_ABI,
-    functionName: "getSummary",
-    args: [agentId, [], "", ""],
-  });
-  const [count, value, decimals] = result as [bigint, bigint, number];
-  return { count, value, decimals };
+
+  try {
+    // Step 1: Get all client addresses that gave feedback to this agent
+    const clients = (await client.readContract({
+      address: ERC8004_REPUTATION_REGISTRY as Hex,
+      abi: REPUTATION_REGISTRY_ABI,
+      functionName: "getClients",
+      args: [agentId],
+    })) as readonly Hex[];
+
+    if (!clients || clients.length === 0) {
+      return { count: BigInt(0), value: BigInt(0), decimals: 0 };
+    }
+
+    // Step 2: Get summary with actual client addresses
+    const result = await client.readContract({
+      address: ERC8004_REPUTATION_REGISTRY as Hex,
+      abi: REPUTATION_REGISTRY_ABI,
+      functionName: "getSummary",
+      args: [agentId, [...clients], "", ""],
+    });
+    const [count, value, decimals] = result as [bigint, bigint, number];
+    return { count, value, decimals };
+  } catch {
+    return null;
+  }
 }

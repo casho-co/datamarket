@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { PostJobButton } from "@/components/jobs/post-job-button";
 
 async function getJobs(searchParams: Record<string, string>) {
   const params = new URLSearchParams(searchParams);
@@ -50,7 +51,9 @@ export default async function JobsPage({
           <h1 className="text-3xl font-bold">Jobs</h1>
           <p className="text-sm text-muted mt-1">Browse available tasks and bounties</p>
         </div>
-        <div className="flex items-center gap-1 bg-surface border border-border rounded-xl p-1">
+        <div className="flex items-center gap-3">
+          <PostJobButton />
+          <div className="flex items-center gap-1 bg-surface border border-border rounded-xl p-1">
           <Link
             href="/jobs"
             className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
@@ -72,6 +75,7 @@ export default async function JobsPage({
               {opt.label}
             </Link>
           ))}
+          </div>
         </div>
       </div>
 

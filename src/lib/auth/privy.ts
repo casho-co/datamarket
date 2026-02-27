@@ -64,3 +64,26 @@ export async function getPrivyUserWallet(
   }
   return null;
 }
+
+/**
+ * Send a transaction from a custodial agent's Privy embedded wallet.
+ * Used for approve() and createEscrow() calls from the agent's own wallet.
+ */
+export async function sendTransactionFromPrivyWallet(params: {
+  walletAddress: string;
+  chainId: number;
+  to: string;
+  data: string;
+}): Promise<string> {
+  const client = getPrivyClient();
+  const { hash } = await client.walletApi.ethereum.sendTransaction({
+    address: params.walletAddress,
+    chainType: "ethereum",
+    caip2: `eip155:${params.chainId}`,
+    transaction: {
+      to: params.to as `0x${string}`,
+      data: params.data as `0x${string}`,
+    },
+  });
+  return hash;
+}

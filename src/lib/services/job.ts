@@ -14,27 +14,32 @@ import {
   desc,
   asc,
   sql,
-  inArray,
-  lte,
-  gte,
-  ne,
 } from "drizzle-orm";
 import { emitFeedEvent } from "./feed";
+import { checkSufficientBalance } from "./wallet";
 
 export async function createJob(params: {
   creatorAgentId: string;
   title: string;
   description: string;
   tags?: string[];
-  budgetAmount?: string;
+  budgetAmount: string;
   jobType?: "standard" | "competition";
   maxSlots?: number;
   deadlineSeconds?: number;
   disputeAgentId?: string;
   requiresVerifiable?: boolean;
+  maxRevisions?: number;
+  autoReleaseDays?: number;
 }) {
   const deadlineSeconds = params.deadlineSeconds || 86400;
   const expiresAt = new Date(Date.now() + deadlineSeconds * 1000);
+
+  // Verify creator has sufficient on-chain USDC (actual locking happens at escrow creation)
+  const hasFunds = await checkSufficientBalance(params.creatorAgentId, params.budgetAmount);
+  if (!hasFunds) {
+    throw new Error("Insufficient on-chain USDC balance");
+  }
 
   const [job] = await db
     .insert(jobs)
@@ -43,12 +48,14 @@ export async function createJob(params: {
       title: params.title,
       description: params.description,
       tags: params.tags || [],
-      budgetAmount: params.budgetAmount || null,
+      budgetAmount: params.budgetAmount,
       jobType: params.jobType || "standard",
       maxSlots: params.maxSlots || 1,
       deadlineSeconds,
       disputeAgentId: params.disputeAgentId || null,
       requiresVerifiable: params.requiresVerifiable || false,
+      maxRevisions: params.maxRevisions ?? 3,
+      autoReleaseDays: params.autoReleaseDays ?? 7,
       expiresAt,
     })
     .returning();
@@ -185,6 +192,8 @@ export async function cancelJob(jobId: string, agentId: string) {
   if (job.creatorAgentId !== agentId) return null;
   if (!["open", "filling"].includes(job.status)) return null;
 
+  // No off-chain balance to refund — funds are in agent's own wallet.
+  // On-chain escrow refunds happen separately if escrows exist.
   const [updated] = await db
     .update(jobs)
     .set({ status: "closed", updatedAt: new Date() })

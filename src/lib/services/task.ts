@@ -2,18 +2,19 @@ import { db, withTransaction, type TX } from "@/lib/db";
 import {
   tasks,
   escrows,
-  agentWallets,
   agents,
   reputation,
   submissionHistory,
   fileUploads,
 } from "@/lib/db/schema";
 import { eq, and, sql, desc } from "drizzle-orm";
+import { checkSufficientBalance } from "./wallet";
 import { validateTaskTransition, validateEscrowTransition } from "./state-machine";
 import { emitFeedEvent } from "./feed";
 import { updateReputation } from "./reputation";
+import { giveOnChainFeedback } from "@/lib/bsc/erc8004";
 import {
-  oracleCreateEscrow,
+  agentCreateEscrow,
   oracleRelease as onChainRelease,
   oracleRefund as onChainRefund,
 } from "@/lib/bsc/escrow-contract";
@@ -109,24 +110,9 @@ export async function acceptQuote(params: {
 
     validateTaskTransition(task.status, "accepted", task.id);
 
-    const amount = parseFloat(task.quotedAmount);
-
-    // Debit creator
-    const [debitResult] = await tx
-      .update(agentWallets)
-      .set({
-        balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) - ${amount})::TEXT`,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(agentWallets.agentId, params.creatorAgentId),
-          sql`CAST(${agentWallets.balance} AS DECIMAL) >= ${amount}`
-        )
-      )
-      .returning({ agentId: agentWallets.agentId });
-
-    if (!debitResult) throw new Error("Insufficient balance");
+    // Verify on-chain balance before creating escrow
+    const hasFunds = await checkSufficientBalance(params.creatorAgentId, task.quotedAmount);
+    if (!hasFunds) throw new Error("Insufficient on-chain USDC balance");
 
     // Create escrow (on-chain)
     const [escrow] = await tx
@@ -158,10 +144,10 @@ export async function acceptQuote(params: {
     return { task, escrow };
   });
 
-  // Lock funds on-chain via smart contract
+  // Create on-chain escrow from agent's own wallet
   if (ESCROW_CONTRACT_ADDRESS && result.escrow) {
     const [funder] = await db
-      .select({ walletAddress: agents.walletAddress })
+      .select({ walletAddress: agents.walletAddress, walletMode: agents.walletMode })
       .from(agents)
       .where(eq(agents.id, params.creatorAgentId));
     const [recipient] = await db
@@ -171,29 +157,24 @@ export async function acceptQuote(params: {
 
     if (funder?.walletAddress && recipient?.walletAddress) {
       try {
-        const txHash = await oracleCreateEscrow({
+        const escrowResult = await agentCreateEscrow({
+          walletMode: funder.walletMode as "custodial" | "non_custodial",
+          walletAddress: funder.walletAddress,
           escrowId: result.escrow.id,
-          buyerAddress: funder.walletAddress,
           sellerAddress: recipient.walletAddress,
           token: "USDC",
           amount: result.task.quotedAmount!,
           deadlineHours: DEFAULT_DEADLINE_HOURS,
           disputeWindowHours: DEFAULT_DISPUTE_WINDOW_HOURS,
         });
-        await db
-          .update(escrows)
-          .set({ onChainTxHash: txHash })
-          .where(eq(escrows.id, result.escrow.id));
+        if (escrowResult.txHash) {
+          await db
+            .update(escrows)
+            .set({ onChainTxHash: escrowResult.txHash })
+            .where(eq(escrows.id, result.escrow.id));
+        }
       } catch {
-        // Rollback: delete escrow and re-credit balance
         await db.delete(escrows).where(eq(escrows.id, result.escrow.id));
-        await db
-          .update(agentWallets)
-          .set({
-            balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) + ${parseFloat(result.task.quotedAmount!)})::TEXT`,
-            updatedAt: new Date(),
-          })
-          .where(eq(agentWallets.agentId, params.creatorAgentId));
         throw new Error("Failed to create on-chain escrow");
       }
     }
@@ -376,6 +357,28 @@ export async function completeTask(params: {
 
   // Post-tx side effects
   await updateReputation(result.task.workerAgentId);
+
+  // On-chain reputation feedback for task completion
+  try {
+    const [worker] = await db
+      .select({ erc8004AgentId: agents.erc8004AgentId, mcpEndpoint: agents.mcpEndpoint })
+      .from(agents)
+      .where(eq(agents.id, result.task.workerAgentId));
+    if (worker?.erc8004AgentId) {
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://datalayer-market.fly.dev";
+      await giveOnChainFeedback({
+        agentId: worker.erc8004AgentId,
+        value: 100,
+        tag1: "task",
+        tag2: "completed",
+        feedbackURI: `${baseUrl}/api/v1/tasks/${params.taskId}`,
+        endpoint: worker.mcpEndpoint || "",
+      });
+    }
+  } catch {
+    // On-chain feedback is best-effort
+  }
+
   await emitFeedEvent("task_completed", null, {
     task_id: params.taskId,
     title: result.task.title,

@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/middleware";
 import { createJob, listJobs } from "@/lib/services/job";
-import { getBalance } from "@/lib/services/wallet";
-import { MIN_BALANCE_USDC } from "@/lib/bsc/constants";
 import { parsePagination } from "@/lib/utils/pagination";
 import { checkRateLimit, withRateLimitHeaders } from "@/lib/middleware/rate-limit";
 import { logAudit, getClientIp } from "@/lib/services/audit";
@@ -52,15 +50,6 @@ export async function POST(req: NextRequest) {
   }
 
   const body = parsed.data;
-
-  // Check minimum balance
-  const balance = await getBalance(auth.agentId);
-  if (parseFloat(balance) < parseFloat(MIN_BALANCE_USDC)) {
-    return NextResponse.json(
-      { error: `Minimum balance of ${MIN_BALANCE_USDC} USDC required to create jobs` },
-      { status: 400 }
-    );
-  }
 
   try {
     const job = await createJob({

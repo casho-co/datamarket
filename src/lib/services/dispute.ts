@@ -9,10 +9,11 @@ import {
   tasks,
   gigOrders,
   reputation,
-  agentWallets,
+  agents,
 } from "@/lib/db/schema";
 import { eq, and, sql, desc } from "drizzle-orm";
 import { DISPUTE_DEPOSIT_BPS, RESOLVER_FEE_BPS } from "@/lib/bsc/constants";
+import { checkSufficientBalance } from "./wallet";
 import { updateReputation } from "./reputation";
 import { emitFeedEvent } from "./feed";
 import {
@@ -26,6 +27,7 @@ import {
   oracleResolveDispute as onChainResolveDispute,
   oracleResolveDisputeSplit as onChainResolveDisputeSplit,
 } from "@/lib/bsc/escrow-contract";
+import { giveOnChainFeedback } from "@/lib/bsc/erc8004";
 
 export async function openDispute(params: {
   jobId: string;
@@ -58,23 +60,9 @@ export async function openDispute(params: {
       10000
     ).toString();
 
-    // Debit dispute deposit atomically
-    const [wallet] = await tx
-      .select()
-      .from(agentWallets)
-      .where(eq(agentWallets.agentId, params.openerAgentId));
-
-    if (!wallet || parseFloat(wallet.balance) < parseFloat(depositAmount)) {
-      throw new Error("Insufficient balance for dispute deposit");
-    }
-
-    await tx
-      .update(agentWallets)
-      .set({
-        balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) - ${parseFloat(depositAmount)})::TEXT`,
-        updatedAt: new Date(),
-      })
-      .where(eq(agentWallets.agentId, params.openerAgentId));
+    // Verify opener has sufficient on-chain USDC for dispute deposit
+    const hasFunds = await checkSufficientBalance(params.openerAgentId, depositAmount);
+    if (!hasFunds) throw new Error("Insufficient on-chain USDC balance for dispute deposit");
 
     // Update assignment status
     validateAssignmentTransition(assignment.status, "disputed", assignment.id);
@@ -276,15 +264,7 @@ export async function resolveDispute(params: {
         .set({ status: "funded" })
         .where(eq(escrows.assignmentId, assignment.id));
 
-      // Refund dispute deposit
-      await tx
-        .update(agentWallets)
-        .set({
-          balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) + ${depositAmount})::TEXT`,
-          totalDeposited: sql`(CAST(${agentWallets.totalDeposited} AS DECIMAL) + ${depositAmount})::TEXT`,
-          updatedAt: new Date(),
-        })
-        .where(eq(agentWallets.agentId, dispute.openerAgentId));
+      // Dispute deposit was on-chain — no off-chain balance to refund
     } else {
       // Resolve on-chain: requester_wins, worker_wins, or split
       let releaseTxHash: string;
@@ -296,15 +276,7 @@ export async function resolveDispute(params: {
         releaseTxHash = await onChainResolveDispute(escrow.id, releaseToSeller);
       }
 
-      // Refund dispute deposit (off-chain — deposit was off-chain)
-      await tx
-        .update(agentWallets)
-        .set({
-          balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) + ${depositAmount})::TEXT`,
-          totalDeposited: sql`(CAST(${agentWallets.totalDeposited} AS DECIMAL) + ${depositAmount})::TEXT`,
-          updatedAt: new Date(),
-        })
-        .where(eq(agentWallets.agentId, dispute.openerAgentId));
+      // Dispute deposit was on-chain — no off-chain balance to refund
 
       // Update reputation
       if (params.ruling === "requester_wins") {
@@ -399,6 +371,45 @@ export async function resolveDispute(params: {
     await updateReputation(result.workerAgentId);
   }
 
+  // On-chain reputation feedback for dispute outcomes
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://datalayer-market.fly.dev";
+  try {
+    if (params.ruling === "requester_wins") {
+      // Worker lost the dispute — negative feedback
+      const [worker] = await db
+        .select({ erc8004AgentId: agents.erc8004AgentId })
+        .from(agents)
+        .where(eq(agents.id, result.workerAgentId));
+      if (worker?.erc8004AgentId) {
+        await giveOnChainFeedback({
+          agentId: worker.erc8004AgentId,
+          value: -50,
+          tag1: "dispute",
+          tag2: "lost",
+          feedbackURI: `${baseUrl}/api/v1/disputes/${params.disputeId}`,
+        });
+      }
+    } else if (params.ruling === "worker_wins") {
+      // Worker won — positive feedback for delivering despite dispute
+      const [worker] = await db
+        .select({ erc8004AgentId: agents.erc8004AgentId, mcpEndpoint: agents.mcpEndpoint })
+        .from(agents)
+        .where(eq(agents.id, result.workerAgentId));
+      if (worker?.erc8004AgentId) {
+        await giveOnChainFeedback({
+          agentId: worker.erc8004AgentId,
+          value: 100,
+          tag1: "dispute",
+          tag2: "won",
+          feedbackURI: `${baseUrl}/api/v1/disputes/${params.disputeId}`,
+          endpoint: worker.mcpEndpoint || "",
+        });
+      }
+    }
+  } catch {
+    // On-chain feedback is best-effort
+  }
+
   await emitFeedEvent("dispute_resolved", result.jobId, {
     job_id: result.jobId,
     dispute_id: params.disputeId,
@@ -435,16 +446,10 @@ export async function openTaskDispute(params: {
       }
     }
 
-    // Debit dispute deposit
+    // Verify on-chain balance for dispute deposit
     if (parseFloat(depositAmount) > 0) {
-      const [wallet] = await tx.select().from(agentWallets).where(eq(agentWallets.agentId, params.openerAgentId));
-      if (!wallet || parseFloat(wallet.balance) < parseFloat(depositAmount)) {
-        throw new Error("Insufficient balance for dispute deposit");
-      }
-      await tx.update(agentWallets).set({
-        balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) - ${parseFloat(depositAmount)})::TEXT`,
-        updatedAt: new Date(),
-      }).where(eq(agentWallets.agentId, params.openerAgentId));
+      const hasFunds = await checkSufficientBalance(params.openerAgentId, depositAmount);
+      if (!hasFunds) throw new Error("Insufficient on-chain USDC balance for dispute deposit");
     }
 
     // Update task status
@@ -500,16 +505,10 @@ export async function openGigOrderDispute(params: {
       }
     }
 
-    // Debit dispute deposit
+    // Verify on-chain balance for dispute deposit
     if (parseFloat(depositAmount) > 0) {
-      const [wallet] = await tx.select().from(agentWallets).where(eq(agentWallets.agentId, params.openerAgentId));
-      if (!wallet || parseFloat(wallet.balance) < parseFloat(depositAmount)) {
-        throw new Error("Insufficient balance for dispute deposit");
-      }
-      await tx.update(agentWallets).set({
-        balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) - ${parseFloat(depositAmount)})::TEXT`,
-        updatedAt: new Date(),
-      }).where(eq(agentWallets.agentId, params.openerAgentId));
+      const hasFunds = await checkSufficientBalance(params.openerAgentId, depositAmount);
+      if (!hasFunds) throw new Error("Insufficient on-chain USDC balance for dispute deposit");
     }
 
     // Update gig order status

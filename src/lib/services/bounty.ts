@@ -3,24 +3,22 @@ import {
   bounties,
   bountyClaims,
   escrows,
-  agentWallets,
   agents,
   reputation,
   submissionHistory,
   fileUploads,
 } from "@/lib/db/schema";
 import { eq, and, sql, desc, inArray } from "drizzle-orm";
+import { checkSufficientBalance } from "./wallet";
 import {
   validateBountyTransition,
   validateBountyClaimTransition,
-  validateEscrowTransition,
 } from "./state-machine";
-import { emitFeedEvent } from "./feed";
 import { updateReputation } from "./reputation";
+import { giveOnChainFeedback } from "@/lib/bsc/erc8004";
 import {
-  oracleCreateEscrow,
+  agentCreateEscrow,
   oracleRelease,
-  oracleRefund,
 } from "@/lib/bsc/escrow-contract";
 import {
   ESCROW_CONTRACT_ADDRESS,
@@ -41,47 +39,30 @@ export async function createBounty(params: {
   maxClaims?: number;
   deadlineDays: number;
 }) {
-  // Verify creator has sufficient balance
+  // Verify creator has sufficient on-chain USDC balance
   const amount = parseFloat(params.reward);
   const totalReward = amount * (params.maxClaims ?? 1);
+  const hasFunds = await checkSufficientBalance(params.creatorAgentId, totalReward.toString());
+  if (!hasFunds) throw new Error("Insufficient on-chain USDC balance");
 
-  return withTransaction(async (tx: TX) => {
-    // Debit creator for total potential reward (reserves custodied funds)
-    const [debitResult] = await tx
-      .update(agentWallets)
-      .set({
-        balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) - ${totalReward})::TEXT`,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(agentWallets.agentId, params.creatorAgentId),
-          sql`CAST(${agentWallets.balance} AS DECIMAL) >= ${totalReward}`
-        )
-      )
-      .returning({ agentId: agentWallets.agentId });
-
-    if (!debitResult) throw new Error("Insufficient balance");
-
-    const deadline = new Date(
+  const deadline = new Date(
       Date.now() + params.deadlineDays * 24 * 60 * 60 * 1000
     );
 
-    const [bounty] = await tx
-      .insert(bounties)
-      .values({
-        creatorAgentId: params.creatorAgentId,
-        title: params.title,
-        description: params.description,
-        reward: params.reward,
-        tags: params.tags || [],
-        maxClaims: params.maxClaims ?? 1,
-        deadline,
-      })
-      .returning();
+  const [bounty] = await db
+    .insert(bounties)
+    .values({
+      creatorAgentId: params.creatorAgentId,
+      title: params.title,
+      description: params.description,
+      reward: params.reward,
+      tags: params.tags || [],
+      maxClaims: params.maxClaims ?? 1,
+      deadline,
+    })
+    .returning();
 
-    return bounty;
-  });
+  return bounty;
 }
 
 // ── Claim Bounty ──
@@ -212,65 +193,9 @@ export async function submitBountyWork(params: {
     inlineResponse: params.inlineResponse || null,
   });
 
-  // Create on-chain escrow for this claim (locks funds in smart contract)
-  if (ESCROW_CONTRACT_ADDRESS) {
-    const [bounty] = await db
-      .select()
-      .from(bounties)
-      .where(eq(bounties.id, claim.bountyId));
-
-    if (bounty) {
-      const [funder] = await db
-        .select({ walletAddress: agents.walletAddress })
-        .from(agents)
-        .where(eq(agents.id, bounty.creatorAgentId));
-      const [recipient] = await db
-        .select({ walletAddress: agents.walletAddress })
-        .from(agents)
-        .where(eq(agents.id, params.claimerAgentId));
-
-      if (funder?.walletAddress && recipient?.walletAddress) {
-        try {
-          // Create escrow DB record
-          const [escrow] = await db
-            .insert(escrows)
-            .values({
-              bountyClaimId: params.claimId,
-              funderAgentId: bounty.creatorAgentId,
-              recipientAgentId: params.claimerAgentId,
-              amount: bounty.reward,
-              escrowType: "on_chain",
-            })
-            .returning();
-
-          // Lock funds on-chain
-          const txHash = await oracleCreateEscrow({
-            escrowId: escrow.id,
-            buyerAddress: funder.walletAddress,
-            sellerAddress: recipient.walletAddress,
-            token: "USDC",
-            amount: bounty.reward,
-            deadlineHours: DEFAULT_DEADLINE_HOURS,
-            disputeWindowHours: DEFAULT_DISPUTE_WINDOW_HOURS,
-          });
-
-          // Update escrow with tx hash
-          await db
-            .update(escrows)
-            .set({ onChainTxHash: txHash })
-            .where(eq(escrows.id, escrow.id));
-
-          // Link escrow to claim
-          await db
-            .update(bountyClaims)
-            .set({ escrowId: escrow.id })
-            .where(eq(bountyClaims.id, params.claimId));
-        } catch {
-          // Escrow creation failed — submission still recorded, escrow can be retried
-        }
-      }
-    }
-  }
+  // Escrow is created at acceptBountyClaim(), not here.
+  // Commitment tracking in checkSufficientBalance() guarantees funds
+  // are reserved for this bounty since creation time.
 
   return updated;
 }
@@ -303,22 +228,17 @@ export async function acceptBountyClaim(params: {
 
     validateBountyClaimTransition(claim.status, "accepted", claim.id);
 
-    // Release escrow on-chain (funds go to claimer)
-    if (claim.escrowId) {
-      const [escrow] = await tx
-        .select()
-        .from(escrows)
-        .where(eq(escrows.id, claim.escrowId));
-
-      if (escrow && escrow.onChainTxHash) {
-        validateEscrowTransition(escrow.status, "released", escrow.id);
-        const releaseTxHash = await oracleRelease(escrow.id);
-        await tx
-          .update(escrows)
-          .set({ status: "released", releasedAt: new Date(), releaseTxHash })
-          .where(eq(escrows.id, escrow.id));
-      }
-    }
+    // Create escrow record (on-chain escrow + release happens after transaction)
+    const [escrow] = await tx
+      .insert(escrows)
+      .values({
+        bountyClaimId: params.claimId,
+        funderAgentId: bounty.creatorAgentId,
+        recipientAgentId: claim.claimerAgentId,
+        amount: bounty.reward,
+        escrowType: "on_chain",
+      })
+      .returning();
 
     // Update reputation
     const rewardAmount = parseFloat(bounty.reward);
@@ -333,7 +253,7 @@ export async function acceptBountyClaim(params: {
 
     await tx
       .update(bountyClaims)
-      .set({ status: "accepted" })
+      .set({ status: "accepted", escrowId: escrow.id })
       .where(eq(bountyClaims.id, params.claimId));
 
     // Check if bounty is fully completed
@@ -355,10 +275,78 @@ export async function acceptBountyClaim(params: {
         .where(eq(bounties.id, params.bountyId));
     }
 
-    return { claim, bounty };
+    return { claim, bounty, escrow };
   });
 
+  // Create on-chain escrow and release atomically (outside DB transaction)
+  if (ESCROW_CONTRACT_ADDRESS && result.escrow) {
+    const [funder] = await db
+      .select({ walletAddress: agents.walletAddress, walletMode: agents.walletMode })
+      .from(agents)
+      .where(eq(agents.id, result.bounty.creatorAgentId));
+    const [recipient] = await db
+      .select({ walletAddress: agents.walletAddress })
+      .from(agents)
+      .where(eq(agents.id, result.claim.claimerAgentId));
+
+    if (funder?.walletAddress && recipient?.walletAddress) {
+      try {
+        // Step 1: Create on-chain escrow (funds move from creator's wallet to contract)
+        const escrowResult = await agentCreateEscrow({
+          walletMode: funder.walletMode as "custodial" | "non_custodial",
+          walletAddress: funder.walletAddress,
+          escrowId: result.escrow.id,
+          sellerAddress: recipient.walletAddress,
+          token: "USDC",
+          amount: result.bounty.reward,
+          deadlineHours: DEFAULT_DEADLINE_HOURS,
+          disputeWindowHours: DEFAULT_DISPUTE_WINDOW_HOURS,
+        });
+
+        if (escrowResult.txHash) {
+          await db
+            .update(escrows)
+            .set({ onChainTxHash: escrowResult.txHash })
+            .where(eq(escrows.id, result.escrow.id));
+
+          // Step 2: Immediately release escrow to worker (bounty payment is instant on accept)
+          const releaseTxHash = await oracleRelease(result.escrow.id);
+          await db
+            .update(escrows)
+            .set({ status: "released", releasedAt: new Date(), releaseTxHash })
+            .where(eq(escrows.id, result.escrow.id));
+        }
+      } catch {
+        // Rollback: delete escrow record if on-chain creation failed
+        await db.delete(escrows).where(eq(escrows.id, result.escrow.id));
+        throw new Error("Failed to create on-chain escrow for bounty payment");
+      }
+    }
+  }
+
   await updateReputation(result.claim.claimerAgentId);
+
+  // On-chain reputation feedback for bounty completion
+  try {
+    const [worker] = await db
+      .select({ erc8004AgentId: agents.erc8004AgentId, mcpEndpoint: agents.mcpEndpoint })
+      .from(agents)
+      .where(eq(agents.id, result.claim.claimerAgentId));
+    if (worker?.erc8004AgentId) {
+      const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://datalayer-market.fly.dev";
+      await giveOnChainFeedback({
+        agentId: worker.erc8004AgentId,
+        value: 100,
+        tag1: "bounty",
+        tag2: "completed",
+        feedbackURI: `${baseUrl}/api/v1/bounties/${params.bountyId}`,
+        endpoint: worker.mcpEndpoint || "",
+      });
+    }
+  } catch {
+    // On-chain feedback is best-effort
+  }
+
   return { success: true };
 }
 
@@ -391,12 +379,10 @@ export async function cancelBounty(params: {
         )
       );
 
-    // Refund on-chain escrows for submitted (unpaid) claims
-    const submittedClaims = await tx
-      .select({
-        id: bountyClaims.id,
-        escrowId: bountyClaims.escrowId,
-      })
+    // Reject all active/submitted claims (no escrow to refund — escrow is
+    // only created at acceptance time, so unaccepted claims have no escrow)
+    const pendingClaims = await tx
+      .select({ id: bountyClaims.id })
       .from(bountyClaims)
       .where(
         and(
@@ -405,53 +391,15 @@ export async function cancelBounty(params: {
         )
       );
 
-    for (const claim of submittedClaims) {
-      if (claim.escrowId) {
-        const [escrow] = await tx
-          .select()
-          .from(escrows)
-          .where(eq(escrows.id, claim.escrowId));
-
-        if (escrow && escrow.onChainTxHash && escrow.status === "funded") {
-          try {
-            validateEscrowTransition(escrow.status, "refunded", escrow.id);
-            const refundTxHash = await oracleRefund(escrow.id);
-            await tx
-              .update(escrows)
-              .set({
-                status: "refunded",
-                refundedAt: new Date(),
-                releaseTxHash: refundTxHash,
-              })
-              .where(eq(escrows.id, escrow.id));
-          } catch {
-            // Continue with other refunds
-          }
-        }
-      }
-
-      // Reject the claim
+    for (const claim of pendingClaims) {
       await tx
         .update(bountyClaims)
         .set({ status: "rejected" })
         .where(eq(bountyClaims.id, claim.id));
     }
 
-    // Refund platform balance for unclaimed slots (no escrow was created)
-    const paidClaims = acceptedClaims.length;
-    const refundedClaims = submittedClaims.filter((c) => c.escrowId).length;
-    const unclaimedSlots = bounty.maxClaims - paidClaims - refundedClaims;
-    const unclaimedRefund = unclaimedSlots * parseFloat(bounty.reward);
-
-    if (unclaimedRefund > 0) {
-      await tx
-        .update(agentWallets)
-        .set({
-          balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) + ${unclaimedRefund})::TEXT`,
-          updatedAt: new Date(),
-        })
-        .where(eq(agentWallets.agentId, params.creatorAgentId));
-    }
+    // No off-chain balance to refund — funds are in agent's own wallet.
+    // No on-chain escrow refunds needed — escrow is only created at acceptance.
 
     const [updated] = await tx
       .update(bounties)

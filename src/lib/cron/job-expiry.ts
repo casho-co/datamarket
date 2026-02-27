@@ -54,6 +54,9 @@ export async function runJobExpiry() {
             )
           );
 
+        // No off-chain balance to refund — funds are in agent's own wallet.
+        // On-chain escrow refunds are handled above.
+
         // Mark job expired
         validateJobTransition(job.status, "expired", job.id);
         await tx

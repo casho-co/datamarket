@@ -74,6 +74,12 @@ const SAFE_MESSAGES = new Set([
 
   // State machine
   "Invalid state transition",
+
+  // Token launch
+  "name, symbol, and description are required",
+  "Valid token address is required",
+  "tokenAddress and amountBnb are required",
+  "tokenAddress and tokenAmount are required",
 ]);
 
 export function safeErrorMessage(err: unknown): string {

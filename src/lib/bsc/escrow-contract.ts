@@ -2,6 +2,7 @@ import { type Hex, encodeFunctionData, keccak256, toHex, parseUnits, formatUnits
 import { bsc } from "viem/chains";
 import { getPublicClient, getWalletClient, getPlatformAccount } from "./client";
 import {
+  BSC_CHAIN_ID,
   ESCROW_CONTRACT_ADDRESS,
   USDC_DECIMALS,
   TOKEN_ADDRESSES,
@@ -290,6 +291,70 @@ export function buildReleaseData(escrowId: string): { to: string; data: Hex } {
       args: [uuidToBytes32(escrowId)],
     }),
   };
+}
+
+// ============ AGENT WALLET ESCROW (direct on-chain from agent's wallet) ============
+
+/**
+ * Create an escrow from the agent's own wallet.
+ * - Custodial agents: Privy server-side signing (approve + createEscrow)
+ * - Non-custodial agents: returns unsigned tx data for the agent to sign
+ */
+export async function agentCreateEscrow(params: {
+  walletMode: "custodial" | "non_custodial";
+  walletAddress: string;
+  escrowId: string;
+  sellerAddress: string;
+  token: SupportedToken;
+  amount: string;
+  deadlineHours: number;
+  disputeWindowHours: number;
+}): Promise<{ txHash?: string; unsignedTx?: { approveData: { to: string; data: Hex }; to: string; data: Hex } }> {
+  if (params.walletMode === "non_custodial") {
+    const txData = buildCreateEscrowData({
+      escrowId: params.escrowId,
+      seller: params.sellerAddress,
+      token: params.token,
+      amount: params.amount,
+      deadlineHours: params.deadlineHours,
+      disputeWindowHours: params.disputeWindowHours,
+    });
+    return { unsignedTx: txData };
+  }
+
+  // Custodial: sign via Privy server-side wallet API
+  const { sendTransactionFromPrivyWallet } = await import("@/lib/auth/privy");
+
+  const txData = buildCreateEscrowData({
+    escrowId: params.escrowId,
+    seller: params.sellerAddress,
+    token: params.token,
+    amount: params.amount,
+    deadlineHours: params.deadlineHours,
+    disputeWindowHours: params.disputeWindowHours,
+  });
+
+  const publicClient = getPublicClient();
+
+  // Step 1: Approve escrow contract to spend tokens from agent's wallet
+  const approveHash = await sendTransactionFromPrivyWallet({
+    walletAddress: params.walletAddress,
+    chainId: BSC_CHAIN_ID,
+    to: txData.approveData.to,
+    data: txData.approveData.data,
+  });
+  await publicClient.waitForTransactionReceipt({ hash: approveHash as Hex });
+
+  // Step 2: Create escrow from agent's wallet
+  const escrowHash = await sendTransactionFromPrivyWallet({
+    walletAddress: params.walletAddress,
+    chainId: BSC_CHAIN_ID,
+    to: txData.to,
+    data: txData.data,
+  });
+  await publicClient.waitForTransactionReceipt({ hash: escrowHash as Hex });
+
+  return { txHash: escrowHash };
 }
 
 // ============ ORACLE EXECUTION (for custodial / platform operations) ============

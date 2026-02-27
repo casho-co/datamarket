@@ -6,16 +6,16 @@ import {
   bids,
   reputation,
   agents,
-  agentWallets,
   submissionHistory,
   fileUploads,
 } from "@/lib/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { updateReputation } from "./reputation";
 import { emitFeedEvent } from "./feed";
+import { checkSufficientBalance } from "./wallet";
 import { giveOnChainFeedback } from "@/lib/bsc/erc8004";
 import {
-  oracleCreateEscrow,
+  agentCreateEscrow,
   oracleRelease as onChainRelease,
   oracleRefund as onChainRefund,
   oracleResolveDispute as onChainResolveDispute,
@@ -55,23 +55,19 @@ export async function awardJob(params: {
     const amount = bid.amount;
     const parsedAmount = parseFloat(amount);
 
-    // Atomic check-and-debit: only deducts if balance is sufficient (prevents TOCTOU race)
-    const [debitResult] = await tx
-      .update(agentWallets)
-      .set({
-        balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) - ${parsedAmount})::TEXT`,
-        updatedAt: new Date(),
-      })
-      .where(
-        and(
-          eq(agentWallets.agentId, params.requesterAgentId),
-          sql`CAST(${agentWallets.balance} AS DECIMAL) >= ${parsedAmount}`
-        )
-      )
-      .returning({ agentId: agentWallets.agentId });
+    if (!job.budgetAmount) {
+      throw new Error("Job has no budget set");
+    }
+    const parsedBudget = parseFloat(job.budgetAmount);
 
-    if (!debitResult) {
-      throw new Error("Insufficient balance");
+    if (parsedAmount > parsedBudget) {
+      throw new Error("Bid amount exceeds job budget");
+    }
+
+    // Verify funder has sufficient on-chain balance for the bid amount
+    const hasFunds = await checkSufficientBalance(params.requesterAgentId, amount);
+    if (!hasFunds) {
+      throw new Error("Insufficient on-chain USDC balance to fund escrow");
     }
 
     // Accept this bid, reject others
@@ -99,7 +95,7 @@ export async function awardJob(params: {
       })
       .returning();
 
-    // Create escrow record (on-chain)
+    // Create escrow record
     const [escrow] = await tx
       .insert(escrows)
       .values({
@@ -129,10 +125,10 @@ export async function awardJob(params: {
     return { assignment, escrow, jobTitle: job.title, workerAgentId: bid.bidderAgentId, amount };
   });
 
-  // Lock funds on-chain via smart contract
+  // Create on-chain escrow from agent's own wallet
   if (ESCROW_CONTRACT_ADDRESS) {
     const [funder] = await db
-      .select({ walletAddress: agents.walletAddress })
+      .select({ walletAddress: agents.walletAddress, walletMode: agents.walletMode })
       .from(agents)
       .where(eq(agents.id, params.requesterAgentId));
     const [recipient] = await db
@@ -142,30 +138,32 @@ export async function awardJob(params: {
 
     if (funder?.walletAddress && recipient?.walletAddress) {
       try {
-        const txHash = await oracleCreateEscrow({
+        const escrowResult = await agentCreateEscrow({
+          walletMode: funder.walletMode as "custodial" | "non_custodial",
+          walletAddress: funder.walletAddress,
           escrowId: result.escrow.id,
-          buyerAddress: funder.walletAddress,
           sellerAddress: recipient.walletAddress,
           token: "USDC",
           amount: result.amount,
           deadlineHours: DEFAULT_DEADLINE_HOURS,
           disputeWindowHours: DEFAULT_DISPUTE_WINDOW_HOURS,
         });
-        await db
-          .update(escrows)
-          .set({ onChainTxHash: txHash })
-          .where(eq(escrows.id, result.escrow.id));
-        result.escrow = { ...result.escrow, onChainTxHash: txHash };
+
+        if (escrowResult.txHash) {
+          await db
+            .update(escrows)
+            .set({ onChainTxHash: escrowResult.txHash })
+            .where(eq(escrows.id, result.escrow.id));
+          result.escrow = { ...result.escrow, onChainTxHash: escrowResult.txHash };
+        }
+
+        // For non-custodial agents, return unsigned tx data
+        if (escrowResult.unsignedTx) {
+          (result as any).unsignedTx = escrowResult.unsignedTx;
+        }
       } catch {
-        // Rollback: re-credit balance and delete escrow
+        // Rollback: delete escrow record (no off-chain balance to restore)
         await db.delete(escrows).where(eq(escrows.id, result.escrow.id));
-        await db
-          .update(agentWallets)
-          .set({
-            balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) + ${parseFloat(result.amount)})::TEXT`,
-            updatedAt: new Date(),
-          })
-          .where(eq(agentWallets.agentId, params.requesterAgentId));
         throw new Error("Failed to create on-chain escrow");
       }
     }
@@ -179,7 +177,7 @@ export async function awardJob(params: {
     amount: result.amount,
   });
 
-  return { assignment: result.assignment, escrow: result.escrow };
+  return { assignment: result.assignment, escrow: result.escrow, unsignedTx: (result as any).unsignedTx };
 }
 
 export async function submitWork(params: {
@@ -306,7 +304,7 @@ export async function acceptWork(params: {
         assignment.id
       );
 
-      // Release escrow
+      // Release escrow on-chain
       const [escrow] = await tx
         .select()
         .from(escrows)
@@ -370,6 +368,7 @@ export async function acceptWork(params: {
   });
 
   // Post-tx: reputation recalc + on-chain feedback + feed event
+  const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://datalayer-market.fly.dev";
   for (const workerId of result.workerIds) {
     await updateReputation(workerId);
     try {
@@ -378,12 +377,14 @@ export async function acceptWork(params: {
         .from(agents)
         .where(eq(agents.id, workerId));
       if (worker?.erc8004AgentId) {
-        await giveOnChainFeedback(
-          worker.erc8004AgentId,
-          1,
-          "job_completed",
-          "positive"
-        );
+        await giveOnChainFeedback({
+          agentId: worker.erc8004AgentId,
+          value: 100,
+          tag1: "job",
+          tag2: "completed",
+          feedbackURI: `${baseUrl}/api/v1/jobs/${params.jobId}`,
+          endpoint: worker.mcpEndpoint || "",
+        });
       }
     } catch {
       // On-chain feedback is best-effort
@@ -552,8 +553,8 @@ export async function getSubmissionHistoryByEntity(
 // ============ ON-CHAIN ESCROW FUNCTIONS ============
 
 /**
- * Create an on-chain escrow via the DatalayerEscrow smart contract.
- * Locks tokens in the contract and records the escrow in the DB.
+ * Create an on-chain escrow from the funder's own wallet.
+ * Funds are pulled directly from the agent's BSC wallet via approve + transferFrom.
  */
 export async function createOnChainEscrow(params: {
   funderAgentId: string;
@@ -571,9 +572,9 @@ export async function createOnChainEscrow(params: {
     throw new Error("On-chain escrow contract not configured");
   }
 
-  // Look up wallet addresses
+  // Look up wallet addresses and mode
   const [funder] = await db
-    .select({ walletAddress: agents.walletAddress })
+    .select({ walletAddress: agents.walletAddress, walletMode: agents.walletMode })
     .from(agents)
     .where(eq(agents.id, params.funderAgentId));
   if (!funder?.walletAddress) throw new Error("Funder wallet not found");
@@ -584,24 +585,10 @@ export async function createOnChainEscrow(params: {
     .where(eq(agents.id, params.recipientAgentId));
   if (!recipient?.walletAddress) throw new Error("Recipient wallet not found");
 
-  // Debit funder's off-chain balance (prevents double-spending)
-  const parsedAmount = parseFloat(params.amount);
-  const [debitResult] = await db
-    .update(agentWallets)
-    .set({
-      balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) - ${parsedAmount})::TEXT`,
-      updatedAt: new Date(),
-    })
-    .where(
-      and(
-        eq(agentWallets.agentId, params.funderAgentId),
-        sql`CAST(${agentWallets.balance} AS DECIMAL) >= ${parsedAmount}`
-      )
-    )
-    .returning({ agentId: agentWallets.agentId });
-
-  if (!debitResult) {
-    throw new Error("Insufficient balance");
+  // Verify on-chain balance
+  const hasFunds = await checkSufficientBalance(params.funderAgentId, params.amount);
+  if (!hasFunds) {
+    throw new Error("Insufficient on-chain USDC balance");
   }
 
   // Create DB record first to get the escrow ID
@@ -620,10 +607,11 @@ export async function createOnChainEscrow(params: {
     .returning();
 
   try {
-    // Create on-chain escrow via oracle
-    const txHash = await oracleCreateEscrow({
+    // Create on-chain escrow from agent's own wallet
+    const escrowResult = await agentCreateEscrow({
+      walletMode: funder.walletMode as "custodial" | "non_custodial",
+      walletAddress: funder.walletAddress,
       escrowId: escrow.id,
-      buyerAddress: funder.walletAddress,
       sellerAddress: recipient.walletAddress,
       token: params.token,
       amount: params.amount,
@@ -631,23 +619,19 @@ export async function createOnChainEscrow(params: {
       disputeWindowHours: params.disputeWindowHours || DEFAULT_DISPUTE_WINDOW_HOURS,
     });
 
-    // Update DB with on-chain tx hash
-    await db
-      .update(escrows)
-      .set({ onChainTxHash: txHash })
-      .where(eq(escrows.id, escrow.id));
+    if (escrowResult.txHash) {
+      await db
+        .update(escrows)
+        .set({ onChainTxHash: escrowResult.txHash })
+        .where(eq(escrows.id, escrow.id));
+      return { ...escrow, onChainTxHash: escrowResult.txHash };
+    }
 
-    return { ...escrow, onChainTxHash: txHash };
+    // Non-custodial: return unsigned tx data for agent to sign
+    return { ...escrow, unsignedTx: escrowResult.unsignedTx };
   } catch (err) {
-    // Rollback: delete DB record and re-credit funder balance
+    // Rollback: delete DB record (no off-chain balance to restore)
     await db.delete(escrows).where(eq(escrows.id, escrow.id));
-    await db
-      .update(agentWallets)
-      .set({
-        balance: sql`(CAST(${agentWallets.balance} AS DECIMAL) + ${parsedAmount})::TEXT`,
-        updatedAt: new Date(),
-      })
-      .where(eq(agentWallets.agentId, params.funderAgentId));
     throw err;
   }
 }

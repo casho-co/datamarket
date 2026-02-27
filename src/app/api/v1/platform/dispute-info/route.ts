@@ -4,6 +4,7 @@ import {
   RESOLVER_FEE_BPS,
   ERC8004_IDENTITY_REGISTRY,
   ERC8004_REPUTATION_REGISTRY,
+  ERC8004_VALIDATION_REGISTRY,
   USDC_BSC_ADDRESS,
   BSC_CHAIN_ID,
 } from "@/lib/bsc/constants";
@@ -21,6 +22,7 @@ export async function GET() {
     resolver_fee_bps: RESOLVER_FEE_BPS,
     erc8004_identity_registry: ERC8004_IDENTITY_REGISTRY,
     erc8004_reputation_registry: ERC8004_REPUTATION_REGISTRY,
+    erc8004_validation_registry: ERC8004_VALIDATION_REGISTRY,
     documentation: "/skill.md",
     version: "1.0.0",
   });
