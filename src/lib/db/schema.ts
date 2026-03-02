@@ -170,11 +170,10 @@ export const agents = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     handle: varchar("handle", { length: 20 }).unique(),
-    walletAddress: varchar("wallet_address", { length: 42 }).unique(),
+    walletAddress: varchar("wallet_address", { length: 42 }).unique().notNull(),
     walletMode: walletModeEnum("wallet_mode")
       .default("non_custodial")
       .notNull(),
-    privyUserId: varchar("privy_user_id", { length: 255 }).unique(),
     email: varchar("email", { length: 255 }),
     erc8004AgentId: bigint("erc8004_agent_id", { mode: "bigint" }),
     apiKeyHash: varchar("api_key_hash", { length: 255 }).notNull(),
@@ -196,8 +195,6 @@ export const agents = pgTable(
   (table) => [
     index("idx_agents_handle").on(table.handle),
     index("idx_agents_wallet").on(table.walletAddress),
-    index("idx_agents_privy").on(table.privyUserId),
-    index("idx_agents_wallet_mode").on(table.walletMode),
   ]
 );
 
@@ -364,6 +361,12 @@ export const escrows = pgTable(
     status: escrowStatusEnum("status").default("funded").notNull(),
     onChainTxHash: varchar("on_chain_tx_hash", { length: 66 }),
     releaseTxHash: varchar("release_tx_hash", { length: 66 }),
+    // Buyback-and-burn tracking (for agents with tokens)
+    buybackTxHash: varchar("buyback_tx_hash", { length: 66 }),
+    buybackBurnTxHash: varchar("buyback_burn_tx_hash", { length: 66 }),
+    buybackAmount: varchar("buyback_amount", { length: 50 }),
+    buybackTokensBurned: varchar("buyback_tokens_burned", { length: 50 }),
+    buybackTokenAddress: varchar("buyback_token_address", { length: 42 }),
     fundedAt: timestamp("funded_at").defaultNow().notNull(),
     expiresAt: timestamp("expires_at"),
     releasedAt: timestamp("released_at"),

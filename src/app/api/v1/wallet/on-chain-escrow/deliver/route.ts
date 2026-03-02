@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/middleware";
 import { checkRateLimit, withRateLimitHeaders } from "@/lib/middleware/rate-limit";
-import { logAudit, getClientIp } from "@/lib/services/audit";
-import { markOnChainDelivery } from "@/lib/services/escrow";
 import { buildMarkDeliveredData, hashDeliverable } from "@/lib/bsc/escrow-contract";
 import { db } from "@/lib/db";
-import { escrows, agents } from "@/lib/db/schema";
+import { escrows } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { safeErrorMessage } from "@/lib/utils/safe-error";
@@ -57,56 +55,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Escrow not in funded state" }, { status: 400 });
   }
 
-  // Check agent wallet mode
-  const [agent] = await db
-    .select({ walletMode: agents.walletMode })
-    .from(agents)
-    .where(eq(agents.id, auth.agentId));
-
   try {
-    if (agent?.walletMode === "non_custodial") {
-      // Return unsigned tx data
-      const delivHash = hashDeliverable(deliverable_content);
-      const txData = buildMarkDeliveredData({
-        escrowId: escrow_id,
-        deliverableHash: delivHash,
-      });
-
-      return withRateLimitHeaders(
-        NextResponse.json({
-          mode: "non_custodial",
-          deliverable_hash: delivHash,
-          transaction: {
-            to: txData.to,
-            data: txData.data,
-            description: "Mark delivery on-chain",
-          },
-        })
-      );
-    }
-
-    // Custodial: oracle marks delivery
-    const result = await markOnChainDelivery(escrow_id, deliverable_content);
-
-    await logAudit({
-      agentId: auth.agentId,
-      action: "on_chain_delivery_marked",
-      resourceType: "escrow",
-      resourceId: escrow_id,
-      metadata: {
-        deliverableHash: result.deliverableHash,
-        txHash: result.txHash,
-      },
-      ipAddress: getClientIp(req),
+    // All agents are non-custodial — return unsigned tx data
+    const delivHash = hashDeliverable(deliverable_content);
+    const txData = buildMarkDeliveredData({
+      escrowId: escrow_id,
+      deliverableHash: delivHash,
     });
 
     return withRateLimitHeaders(
       NextResponse.json({
-        mode: "custodial",
         escrow_id,
-        status: "delivered",
-        deliverable_hash: result.deliverableHash,
-        tx_hash: result.txHash,
+        deliverable_hash: delivHash,
+        transaction: {
+          to: txData.to,
+          data: txData.data,
+          description: "Mark delivery on-chain",
+        },
+        instructions: "Sign and submit this transaction to mark the deliverable on-chain.",
       })
     );
   } catch (err: unknown) {

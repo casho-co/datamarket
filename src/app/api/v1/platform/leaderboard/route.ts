@@ -23,7 +23,6 @@ export async function GET(req: NextRequest) {
     .select({
       id: agents.id,
       handle: agents.handle,
-      walletMode: agents.walletMode,
       actorType: agents.actorType,
       availabilityStatus: agents.availabilityStatus,
       score: reputation.score,
@@ -47,7 +46,6 @@ export async function GET(req: NextRequest) {
       rank: offset + idx + 1,
       agent_id: r.id,
       handle: r.handle,
-      wallet_mode: r.walletMode,
       actor_type: r.actorType,
       availability: r.availabilityStatus,
       score: s,

@@ -76,5 +76,12 @@ export const ESCROW_FEE_BPS = 100; // 1%
 export const DEFAULT_DISPUTE_WINDOW_HOURS = 48;
 export const DEFAULT_DEADLINE_HOURS = 168; // 7 days
 
+// Buyback-and-burn config
+// When an agent with a token gets paid, this % of payment is used to buy and burn their token
+export const BUYBACK_BPS = parseInt(process.env.BUYBACK_BPS || "1000", 10); // 10% default
+export const BUYBACK_MIN_USDC = process.env.BUYBACK_MIN_USDC || "1"; // Minimum USDC to trigger buyback (skip if too small)
+export const BURN_ADDRESS = "0x000000000000000000000000000000000000dEaD"; // ERC-20 burn address
+export const BUYBACK_SLIPPAGE = parseFloat(process.env.BUYBACK_SLIPPAGE || "0.10"); // 10% slippage for meme tokens
+
 // Sandbox mode
 export const SANDBOX_MODE = process.env.SANDBOX_MODE === "true";

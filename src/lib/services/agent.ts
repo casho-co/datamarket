@@ -11,7 +11,6 @@ import {
   setAgentWalletOnChain,
   getOnChainReputation,
 } from "@/lib/bsc/erc8004";
-import { verifyPrivyToken, getPrivyUserWallet } from "@/lib/auth/privy";
 import { DEFAULT_SCOPES } from "@/lib/auth/scopes";
 import { getAgentBalance } from "./wallet";
 import { initReputation, getTierForScore } from "./reputation";
@@ -53,9 +52,9 @@ async function registerAndLinkOnChain(
   }
 }
 
-// ── Registration (Dual-Mode) ──
+// ── Registration (Wallet-Only) ──
 
-export async function registerNonCustodialAgent(params: {
+export async function registerAgent(params: {
   walletAddress: string;
   handle?: string;
   description?: string;
@@ -108,88 +107,7 @@ export async function registerNonCustodialAgent(params: {
     apiKey: apiKeyResult.key,
     apiKeyPrefix: apiKeyResult.prefix,
     walletAddress: agent.walletAddress,
-    walletMode: agent.walletMode,
     erc8004AgentId: erc8004AgentId?.toString() || null,
-    handle: agent.handle,
-  };
-}
-
-export async function registerCustodialAgent(params: {
-  privyToken: string;
-  email?: string;
-  handle?: string;
-  description?: string;
-  tags?: string[];
-  skillTags?: string[];
-  capabilities?: Record<string, unknown>;
-  actorType?: "human" | "agent";
-  webhookUrl?: string;
-  mcpEndpoint?: string;
-}) {
-  // Verify Privy token
-  const { privyId } = await verifyPrivyToken(params.privyToken);
-
-  // Check for existing agent with this Privy ID
-  const [existing] = await db
-    .select()
-    .from(agents)
-    .where(eq(agents.privyUserId, privyId));
-  if (existing) throw new Error("Agent already registered with this Privy account");
-
-  // Get wallet address from Privy
-  let walletAddress: string | null = null;
-  try {
-    walletAddress = await getPrivyUserWallet(privyId);
-  } catch {
-    // Wallet may not be created yet
-  }
-
-  const { key, prefix } = generateApiKey();
-  const hash = await hashApiKey(key);
-
-  // Register custodial agents on-chain too — they need ERC-8004 identity
-  // for cross-platform reputation and discoverability
-  const erc8004AgentId = await registerAndLinkOnChain(
-    params.handle,
-    walletAddress
-  );
-
-  const [agent] = await db
-    .insert(agents)
-    .values({
-      walletAddress,
-      walletMode: "custodial",
-      privyUserId: privyId,
-      email: params.email || null,
-      handle: params.handle || null,
-      description: params.description || null,
-      tags: params.tags || [],
-      skillTags: params.skillTags || [],
-      capabilities: params.capabilities || {},
-      actorType: params.actorType || "agent",
-      webhookUrl: params.webhookUrl || null,
-      mcpEndpoint: params.mcpEndpoint || null,
-      apiKeyHash: hash,
-      apiKeyPrefix: prefix,
-      erc8004AgentId,
-    })
-    .returning();
-
-  const apiKeyResult = await createApiKeyForAgent(agent.id, {
-    label: "default",
-    scopes: [...DEFAULT_SCOPES],
-  });
-
-  await initReputation(agent.id);
-
-  return {
-    agentId: agent.id,
-    apiKey: apiKeyResult.key,
-    apiKeyPrefix: apiKeyResult.prefix,
-    walletAddress: agent.walletAddress,
-    walletMode: agent.walletMode,
-    erc8004AgentId: erc8004AgentId?.toString() || null,
-    privyUserId: privyId,
     handle: agent.handle,
   };
 }
@@ -210,7 +128,6 @@ export async function getAgentPublicProfile(identifier: string) {
       id: agents.id,
       handle: agents.handle,
       walletAddress: agents.walletAddress,
-      walletMode: agents.walletMode,
       erc8004AgentId: agents.erc8004AgentId,
       description: agents.description,
       tags: agents.tags,
@@ -298,7 +215,6 @@ export async function listAgents(params: {
       id: agents.id,
       handle: agents.handle,
       walletAddress: agents.walletAddress,
-      walletMode: agents.walletMode,
       description: agents.description,
       tags: agents.tags,
       skillTags: agents.skillTags,
@@ -358,7 +274,6 @@ export async function listAgents(params: {
       id: r.id,
       handle: r.handle,
       walletAddress: r.walletAddress,
-      walletMode: r.walletMode,
       description: r.description,
       tags: r.tags,
       skillTags: r.skillTags,

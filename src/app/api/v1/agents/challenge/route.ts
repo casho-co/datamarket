@@ -12,7 +12,7 @@ export const POST = validatedRoute(
     const rl = await checkRateLimit(ip, "auth");
     if (rl) return rl;
 
-    const result = await createChallenge(body.wallet_address);
+    const result = await createChallenge(body.wallet_address, body.action);
 
     return NextResponse.json(result, { status: 200 });
   }

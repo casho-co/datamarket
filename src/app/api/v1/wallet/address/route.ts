@@ -8,6 +8,5 @@ export async function GET(req: NextRequest) {
   return NextResponse.json({
     agent_id: auth.agentId,
     wallet_address: auth.walletAddress,
-    wallet_mode: auth.walletMode,
   });
 }

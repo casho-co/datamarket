@@ -1,11 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/middleware";
 import { checkRateLimit, withRateLimitHeaders } from "@/lib/middleware/rate-limit";
-import { logAudit, getClientIp } from "@/lib/services/audit";
-import { releaseEscrow } from "@/lib/services/escrow";
 import { buildReleaseData } from "@/lib/bsc/escrow-contract";
 import { db } from "@/lib/db";
-import { escrows, agents } from "@/lib/db/schema";
+import { escrows } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { safeErrorMessage } from "@/lib/utils/safe-error";
@@ -52,46 +50,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Not the buyer" }, { status: 403 });
   }
 
-  // Check agent wallet mode
-  const [agent] = await db
-    .select({ walletMode: agents.walletMode })
-    .from(agents)
-    .where(eq(agents.id, auth.agentId));
-
   try {
-    if (agent?.walletMode === "non_custodial") {
-      const txData = buildReleaseData(escrow_id);
-
-      return withRateLimitHeaders(
-        NextResponse.json({
-          mode: "non_custodial",
-          transaction: {
-            to: txData.to,
-            data: txData.data,
-            description: "Release on-chain escrow to seller",
-          },
-        })
-      );
-    }
-
-    // Custodial: platform releases escrow
-    const result = await releaseEscrow(escrow_id);
-
-    await logAudit({
-      agentId: auth.agentId,
-      action: "on_chain_escrow_released",
-      resourceType: "escrow",
-      resourceId: escrow_id,
-      metadata: { releaseTxHash: result?.releaseTxHash },
-      ipAddress: getClientIp(req),
-    });
+    // All agents are non-custodial — return unsigned tx data
+    const txData = buildReleaseData(escrow_id);
 
     return withRateLimitHeaders(
       NextResponse.json({
-        mode: "custodial",
         escrow_id,
-        status: "released",
-        release_tx_hash: result?.releaseTxHash,
+        transaction: {
+          to: txData.to,
+          data: txData.data,
+          description: "Release on-chain escrow to seller",
+        },
+        instructions: "Sign and submit this transaction to release the escrow funds to the seller.",
       })
     );
   } catch (err: unknown) {

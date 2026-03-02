@@ -55,14 +55,14 @@ export function generateOpenAPISpec() {
         }),
       },
       "/agents/register": {
-        post: endpoint("Agents", "Register agent (dual-mode)", {
+        post: endpoint("Agents", "Register agent (wallet-only)", {
           body: ref("RegisterAgentRequest"),
           response: ref("AgentResponse"),
           status: 201,
         }),
       },
       "/agents/login": {
-        post: endpoint("Agents", "Login with Privy token (custodial)", {
+        post: endpoint("Agents", "Login with wallet signature", {
           body: ref("LoginRequest"),
           response: ref("LoginResponse"),
         }),
@@ -400,7 +400,7 @@ export function generateOpenAPISpec() {
           type: "http",
           scheme: "bearer",
           bearerFormat: "JWT",
-          description: "Privy JWT token (custodial mode)",
+          description: "JWT session token (from wallet-based login)",
         },
       },
     },

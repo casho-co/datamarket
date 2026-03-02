@@ -11,7 +11,6 @@ import { emitFeedEvent } from "./feed";
 import { validateJobTransition } from "./state-machine";
 import {
   agentCreateEscrow,
-  oracleRelease,
 } from "@/lib/bsc/escrow-contract";
 import {
   ESCROW_CONTRACT_ADDRESS,
@@ -104,10 +103,10 @@ export async function resolveCompetition(params: {
         .set({ prizeBps: prize.bps })
         .where(eq(competitionEntries.id, prize.entryId));
 
-      // Create on-chain escrow and immediately release to winner
+      // Create on-chain escrow (agent signs tx separately; release deferred)
       if (ESCROW_CONTRACT_ADDRESS && prizeAmount > 0) {
         const [funder] = await tx
-          .select({ walletAddress: agents.walletAddress, walletMode: agents.walletMode })
+          .select({ walletAddress: agents.walletAddress })
           .from(agents)
           .where(eq(agents.id, params.judgeAgentId));
         const [recipient] = await tx
@@ -128,9 +127,8 @@ export async function resolveCompetition(params: {
               })
               .returning();
 
-            // Create on-chain escrow from agent's own wallet
-            const escrowResult = await agentCreateEscrow({
-              walletMode: funder.walletMode as "custodial" | "non_custodial",
+            // Build unsigned escrow tx for the agent to sign
+            const escrowResult = agentCreateEscrow({
               walletAddress: funder.walletAddress,
               escrowId: escrow.id,
               sellerAddress: recipient.walletAddress,
@@ -140,30 +138,11 @@ export async function resolveCompetition(params: {
               disputeWindowHours: DEFAULT_DISPUTE_WINDOW_HOURS,
             });
 
-            if (escrowResult.txHash) {
-              await tx
-                .update(escrows)
-                .set({ onChainTxHash: escrowResult.txHash })
-                .where(eq(escrows.id, escrow.id));
-
-              // Immediately release to winner
-              const releaseTxHash = await oracleRelease(escrow.id);
-
-              await tx
-                .update(escrows)
-                .set({
-                  status: "released",
-                  releasedAt: new Date(),
-                  releaseTxHash,
-                })
-                .where(eq(escrows.id, escrow.id));
-
-              // Track on the entry
-              await tx
-                .update(competitionEntries)
-                .set({ escrowId: escrow.id, releaseTxHash })
-                .where(eq(competitionEntries.id, prize.entryId));
-            }
+            // Store unsigned tx reference; release deferred until agent signs
+            await tx
+              .update(competitionEntries)
+              .set({ escrowId: escrow.id })
+              .where(eq(competitionEntries.id, prize.entryId));
           } catch {
             // On-chain payment failed for this winner — no off-chain balance to restore
           }

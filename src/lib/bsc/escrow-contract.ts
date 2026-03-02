@@ -293,15 +293,13 @@ export function buildReleaseData(escrowId: string): { to: string; data: Hex } {
   };
 }
 
-// ============ AGENT WALLET ESCROW (direct on-chain from agent's wallet) ============
+// ============ AGENT WALLET ESCROW (non-custodial only) ============
 
 /**
- * Create an escrow from the agent's own wallet.
- * - Custodial agents: Privy server-side signing (approve + createEscrow)
- * - Non-custodial agents: returns unsigned tx data for the agent to sign
+ * Build unsigned escrow transaction for the agent to sign locally.
+ * All agents are non-custodial — they sign their own transactions.
  */
-export async function agentCreateEscrow(params: {
-  walletMode: "custodial" | "non_custodial";
+export function agentCreateEscrow(params: {
   walletAddress: string;
   escrowId: string;
   sellerAddress: string;
@@ -309,22 +307,7 @@ export async function agentCreateEscrow(params: {
   amount: string;
   deadlineHours: number;
   disputeWindowHours: number;
-}): Promise<{ txHash?: string; unsignedTx?: { approveData: { to: string; data: Hex }; to: string; data: Hex } }> {
-  if (params.walletMode === "non_custodial") {
-    const txData = buildCreateEscrowData({
-      escrowId: params.escrowId,
-      seller: params.sellerAddress,
-      token: params.token,
-      amount: params.amount,
-      deadlineHours: params.deadlineHours,
-      disputeWindowHours: params.disputeWindowHours,
-    });
-    return { unsignedTx: txData };
-  }
-
-  // Custodial: sign via Privy server-side wallet API
-  const { sendTransactionFromPrivyWallet } = await import("@/lib/auth/privy");
-
+}): { unsignedTx: { approveData: { to: string; data: Hex }; to: string; data: Hex } } {
   const txData = buildCreateEscrowData({
     escrowId: params.escrowId,
     seller: params.sellerAddress,
@@ -333,31 +316,10 @@ export async function agentCreateEscrow(params: {
     deadlineHours: params.deadlineHours,
     disputeWindowHours: params.disputeWindowHours,
   });
-
-  const publicClient = getPublicClient();
-
-  // Step 1: Approve escrow contract to spend tokens from agent's wallet
-  const approveHash = await sendTransactionFromPrivyWallet({
-    walletAddress: params.walletAddress,
-    chainId: BSC_CHAIN_ID,
-    to: txData.approveData.to,
-    data: txData.approveData.data,
-  });
-  await publicClient.waitForTransactionReceipt({ hash: approveHash as Hex });
-
-  // Step 2: Create escrow from agent's wallet
-  const escrowHash = await sendTransactionFromPrivyWallet({
-    walletAddress: params.walletAddress,
-    chainId: BSC_CHAIN_ID,
-    to: txData.to,
-    data: txData.data,
-  });
-  await publicClient.waitForTransactionReceipt({ hash: escrowHash as Hex });
-
-  return { txHash: escrowHash };
+  return { unsignedTx: txData };
 }
 
-// ============ ORACLE EXECUTION (for custodial / platform operations) ============
+// ============ ORACLE EXECUTION (platform operations) ============
 
 /**
  * Oracle creates an escrow on-chain. Platform wallet signs the tx.

@@ -1,39 +1,14 @@
-import { NextRequest, NextResponse } from "next/server";
-import { requireScope, requireCustodial } from "@/lib/auth/middleware";
-import { validatedRoute } from "@/lib/utils/validated-route";
-import { signMessageSchema } from "@/lib/validators";
-import { checkRateLimit } from "@/lib/middleware/rate-limit";
-import { logAudit, getClientIp } from "@/lib/services/audit";
+import { NextResponse } from "next/server";
 
-export const POST = validatedRoute(
-  { body: signMessageSchema },
-  async (req: NextRequest, { body }) => {
-    const auth = await requireScope(req, "financial");
-    if (auth instanceof NextResponse) return auth;
-
-    const modeErr = requireCustodial(auth);
-    if (modeErr) return modeErr;
-
-    const rl = await checkRateLimit(auth.agentId, "sensitive");
-    if (rl) return rl;
-
-    // TODO: Integrate with Privy SDK to sign messages with managed wallet
-    // const { signMessage } = await import("@/lib/auth/privy");
-    // const signature = await signMessage(auth.agentId, body.message);
-
-    await logAudit({
-      agentId: auth.agentId,
-      action: "sign_message",
-      resourceType: "wallet",
-      resourceId: auth.agentId,
-      metadata: { messageLength: body.message.length },
-      ipAddress: getClientIp(req),
-    });
-
-    return NextResponse.json({
-      message: "Signing via Privy managed wallet",
-      wallet_address: auth.walletAddress,
-      status: "pending_integration",
-    });
-  }
-);
+/**
+ * Server-side message signing — REMOVED.
+ * All agents are non-custodial and sign their own messages client-side.
+ */
+export async function POST() {
+  return NextResponse.json(
+    {
+      error: "Server-side signing has been removed. All agents are non-custodial and must sign messages using their own wallet.",
+    },
+    { status: 410 }
+  );
+}

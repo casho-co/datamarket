@@ -67,7 +67,7 @@ const SAFE_MESSAGES = new Set([
   "Not a participant in this work",
 
   // Auth
-  "Agent already registered with this Privy account",
+  "Agent already registered with this wallet",
   "Wallet address or handle already registered",
   "API key not found",
   "Not key owner",

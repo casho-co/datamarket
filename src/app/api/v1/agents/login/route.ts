@@ -1,72 +1,84 @@
 import { NextRequest, NextResponse } from "next/server";
+import { validatedRoute } from "@/lib/utils/validated-route";
+import { loginSchema } from "@/lib/validators";
+import { verifyChallenge } from "@/lib/services/challenge";
+import { createSessionToken } from "@/lib/auth/jwt";
+import { checkRateLimit } from "@/lib/middleware/rate-limit";
+import { logAudit, getClientIp } from "@/lib/services/audit";
+import { safeErrorMessage } from "@/lib/utils/safe-error";
 import { db } from "@/lib/db";
 import { agents } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { verifyPrivyToken } from "@/lib/auth/privy";
-import { checkRateLimit, withRateLimitHeaders } from "@/lib/middleware/rate-limit";
-import { getClientIp, logAudit } from "@/lib/services/audit";
-import { getNextActions } from "@/lib/utils/next-actions";
+import { DEFAULT_SCOPES } from "@/lib/auth/scopes";
 
-export async function POST(req: NextRequest) {
-  const ip = getClientIp(req);
-  const rl = await checkRateLimit(ip, "auth");
-  if (rl) return rl;
+export const POST = validatedRoute(
+  { body: loginSchema },
+  async (req: NextRequest, { body }) => {
+    const ip = getClientIp(req);
+    const rl = await checkRateLimit(ip, "auth");
+    if (rl) return rl;
 
-  let body: { privy_token?: string };
-  try {
-    body = await req.json();
-  } catch {
-    return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
-  }
+    try {
+      // Verify EIP-712 signature against stored challenge
+      const verification = await verifyChallenge(
+        body.wallet_address,
+        body.nonce,
+        body.signature,
+        "login"
+      );
 
-  if (!body.privy_token) {
-    return NextResponse.json(
-      { error: "privy_token is required" },
-      { status: 400 }
-    );
-  }
+      if (!verification.valid) {
+        return NextResponse.json(
+          { error: verification.error || "Wallet verification failed" },
+          { status: 401 }
+        );
+      }
 
-  try {
-    const { privyId } = await verifyPrivyToken(body.privy_token);
+      // Look up agent by wallet address
+      const [agent] = await db
+        .select({
+          id: agents.id,
+          walletAddress: agents.walletAddress,
+          handle: agents.handle,
+        })
+        .from(agents)
+        .where(eq(agents.walletAddress, body.wallet_address));
 
-    const [agent] = await db
-      .select({
-        id: agents.id,
-        handle: agents.handle,
-        walletAddress: agents.walletAddress,
-        walletMode: agents.walletMode,
-      })
-      .from(agents)
-      .where(eq(agents.privyUserId, privyId));
+      if (!agent) {
+        return NextResponse.json(
+          { error: "Agent not found. Register first via POST /api/v1/agents/register" },
+          { status: 404 }
+        );
+      }
 
-    if (!agent) {
+      // Create JWT session token
+      const accessToken = await createSessionToken({
+        agentId: agent.id,
+        walletAddress: agent.walletAddress!,
+        scopes: [...DEFAULT_SCOPES],
+      });
+
+      await logAudit({
+        agentId: agent.id,
+        action: "login",
+        resourceType: "agent",
+        resourceId: agent.id,
+        metadata: { walletAddress: body.wallet_address },
+        ipAddress: ip,
+      });
+
+      return NextResponse.json({
+        access_token: accessToken,
+        token_type: "bearer",
+        agent_id: agent.id,
+        wallet_address: agent.walletAddress,
+        handle: agent.handle,
+      });
+    } catch (err: unknown) {
       return NextResponse.json(
-        { error: "No agent registered with this Privy account" },
-        { status: 404 }
+        { error: safeErrorMessage(err) },
+        { status: 500 }
       );
     }
-
-    await logAudit({
-      agentId: agent.id,
-      action: "login",
-      resourceType: "agent",
-      resourceId: agent.id,
-      metadata: { mode: "privy" },
-      ipAddress: ip,
-    });
-
-    return withRateLimitHeaders(NextResponse.json({
-      agent_id: agent.id,
-      handle: agent.handle,
-      wallet_address: agent.walletAddress,
-      wallet_mode: agent.walletMode,
-      message: "Use your Privy token as Bearer token for API calls",
-      next_actions: getNextActions("registered"),
-    }));
-  } catch {
-    return NextResponse.json(
-      { error: "Invalid Privy token" },
-      { status: 401 }
-    );
   }
-}
+);

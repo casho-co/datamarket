@@ -18,7 +18,6 @@ import { updateReputation } from "./reputation";
 import { giveOnChainFeedback } from "@/lib/bsc/erc8004";
 import {
   agentCreateEscrow,
-  oracleRelease,
 } from "@/lib/bsc/escrow-contract";
 import {
   ESCROW_CONTRACT_ADDRESS,
@@ -281,7 +280,7 @@ export async function acceptBountyClaim(params: {
   // Create on-chain escrow and release atomically (outside DB transaction)
   if (ESCROW_CONTRACT_ADDRESS && result.escrow) {
     const [funder] = await db
-      .select({ walletAddress: agents.walletAddress, walletMode: agents.walletMode })
+      .select({ walletAddress: agents.walletAddress })
       .from(agents)
       .where(eq(agents.id, result.bounty.creatorAgentId));
     const [recipient] = await db
@@ -290,37 +289,20 @@ export async function acceptBountyClaim(params: {
       .where(eq(agents.id, result.claim.claimerAgentId));
 
     if (funder?.walletAddress && recipient?.walletAddress) {
-      try {
-        // Step 1: Create on-chain escrow (funds move from creator's wallet to contract)
-        const escrowResult = await agentCreateEscrow({
-          walletMode: funder.walletMode as "custodial" | "non_custodial",
-          walletAddress: funder.walletAddress,
-          escrowId: result.escrow.id,
-          sellerAddress: recipient.walletAddress,
-          token: "USDC",
-          amount: result.bounty.reward,
-          deadlineHours: DEFAULT_DEADLINE_HOURS,
-          disputeWindowHours: DEFAULT_DISPUTE_WINDOW_HOURS,
-        });
+      // Build unsigned escrow transaction for the agent to sign
+      const escrowResult = agentCreateEscrow({
+        walletAddress: funder.walletAddress,
+        escrowId: result.escrow.id,
+        sellerAddress: recipient.walletAddress,
+        token: "USDC",
+        amount: result.bounty.reward,
+        deadlineHours: DEFAULT_DEADLINE_HOURS,
+        disputeWindowHours: DEFAULT_DISPUTE_WINDOW_HOURS,
+      });
 
-        if (escrowResult.txHash) {
-          await db
-            .update(escrows)
-            .set({ onChainTxHash: escrowResult.txHash })
-            .where(eq(escrows.id, result.escrow.id));
-
-          // Step 2: Immediately release escrow to worker (bounty payment is instant on accept)
-          const releaseTxHash = await oracleRelease(result.escrow.id);
-          await db
-            .update(escrows)
-            .set({ status: "released", releasedAt: new Date(), releaseTxHash })
-            .where(eq(escrows.id, result.escrow.id));
-        }
-      } catch {
-        // Rollback: delete escrow record if on-chain creation failed
-        await db.delete(escrows).where(eq(escrows.id, result.escrow.id));
-        throw new Error("Failed to create on-chain escrow for bounty payment");
-      }
+      // Attach unsigned tx to the result for the API to return to the agent.
+      // The agent signs and submits these transactions locally.
+      (result.escrow as Record<string, unknown>).unsignedTx = escrowResult.unsignedTx;
     }
   }
 

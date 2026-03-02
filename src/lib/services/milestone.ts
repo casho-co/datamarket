@@ -1,7 +1,71 @@
 import { db, withTransaction, type TX } from "@/lib/db";
-import { escrowMilestones, escrows } from "@/lib/db/schema";
+import { escrowMilestones, escrows, tokenLaunches } from "@/lib/db/schema";
 import { eq, and, sql, asc } from "drizzle-orm";
 import { oracleRelease as onChainRelease } from "@/lib/bsc/escrow-contract";
+import { processPaymentWithBuyback, type BuybackResult } from "@/lib/bsc/buyback";
+
+/**
+ * Look up an agent's launched token address (Four.meme token).
+ * Returns the token address if the agent has a successfully launched token, null otherwise.
+ */
+async function getAgentTokenAddress(agentId: string): Promise<string | null> {
+  const [launch] = await db
+    .select({ tokenAddress: tokenLaunches.tokenAddress })
+    .from(tokenLaunches)
+    .where(
+      and(
+        eq(tokenLaunches.agentId, agentId),
+        eq(tokenLaunches.status, "launched")
+      )
+    )
+    .limit(1);
+  return launch?.tokenAddress || null;
+}
+
+/**
+ * Execute buyback-and-burn for a worker agent's token after escrow release.
+ * If the agent has a launched token, a % of the released payment is used to
+ * buy and burn their token via PancakeSwap (LiFi aggregator).
+ *
+ * This is best-effort — if buyback fails, the payment still goes through.
+ */
+async function tryBuybackForAgent(
+  workerAgentId: string,
+  escrowAmount: string,
+  escrowId: string
+): Promise<BuybackResult | null> {
+  try {
+    const tokenAddress = await getAgentTokenAddress(workerAgentId);
+    if (!tokenAddress) return null; // No token — no buyback
+
+    const result = await processPaymentWithBuyback({
+      totalAmount: escrowAmount,
+      tokenAddress,
+    });
+
+    // Log the buyback result to the escrow record
+    if (result.swapTxHash || result.burnTxHash) {
+      await db
+        .update(escrows)
+        .set({
+          buybackTxHash: result.swapTxHash,
+          buybackBurnTxHash: result.burnTxHash,
+          buybackAmount: result.buybackAmount,
+          buybackTokensBurned: result.tokensBurned,
+          buybackTokenAddress: result.tokenAddress,
+        })
+        .where(eq(escrows.id, escrowId));
+    }
+
+    return result;
+  } catch (err) {
+    console.error(
+      `Buyback failed for agent ${workerAgentId}:`,
+      err instanceof Error ? err.message : err
+    );
+    return null; // Buyback failure is non-fatal
+  }
+}
 
 export async function createMilestones(params: {
   escrowId: string;
@@ -68,7 +132,7 @@ export async function releaseMilestone(params: {
   milestoneId: string;
   agentId: string;
 }) {
-  return withTransaction(async (tx: TX) => {
+  const result = await withTransaction(async (tx: TX) => {
     const [milestone] = await tx
       .select()
       .from(escrowMilestones)
@@ -110,6 +174,7 @@ export async function releaseMilestone(params: {
       .returning();
 
     // Check if all milestones released → release on-chain escrow
+    let releasedEscrow: { id: string; amount: string; recipientAgentId: string } | null = null;
     const remaining = await tx
       .select()
       .from(escrowMilestones)
@@ -130,8 +195,24 @@ export async function releaseMilestone(params: {
         .update(escrows)
         .set({ status: "released", releasedAt: new Date(), releaseTxHash })
         .where(eq(escrows.id, milestone.escrowId));
+      if (escrow.recipientAgentId) {
+        releasedEscrow = { id: escrow.id, amount: escrow.amount, recipientAgentId: escrow.recipientAgentId };
+      }
     }
 
-    return updated;
+    return { milestone: updated, releasedEscrow };
   });
+
+  // Post-tx: buyback-and-burn for recipient agent's token (best-effort, non-blocking)
+  if (result.releasedEscrow) {
+    tryBuybackForAgent(
+      result.releasedEscrow.recipientAgentId,
+      result.releasedEscrow.amount,
+      result.releasedEscrow.id
+    ).catch(() => {
+      // Buyback is best-effort — failure does not affect the payment
+    });
+  }
+
+  return result.milestone;
 }

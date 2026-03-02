@@ -7,16 +7,19 @@ import {
   useState,
   useCallback,
 } from "react";
-import { usePrivy } from "@privy-io/react-auth";
 
 interface AuthState {
   agentId: string | null;
   handle: string | null;
   walletAddress: string | null;
+  accessToken: string | null;
   isAuthenticated: boolean;
   isLoading: boolean;
+  /** Navigate to wallet connect / login page */
   login: () => void;
-  logout: () => Promise<void>;
+  /** Store session after wallet-based login completes */
+  setSession: (token: string, agent: { agentId: string; handle: string | null; walletAddress: string }) => void;
+  logout: () => void;
   getToken: () => Promise<string | null>;
 }
 
@@ -24,10 +27,12 @@ const AuthContext = createContext<AuthState>({
   agentId: null,
   handle: null,
   walletAddress: null,
+  accessToken: null,
   isAuthenticated: false,
   isLoading: true,
   login: () => {},
-  logout: async () => {},
+  setSession: () => {},
+  logout: () => {},
   getToken: async () => null,
 });
 
@@ -35,97 +40,72 @@ export function useAuth() {
   return useContext(AuthContext);
 }
 
-export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const {
-    ready,
-    authenticated,
-    login,
-    logout: privyLogout,
-    getAccessToken,
-  } = usePrivy();
+const SESSION_KEY = "datalayer_session";
 
+interface StoredSession {
+  accessToken: string;
+  agentId: string;
+  handle: string | null;
+  walletAddress: string;
+}
+
+export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [agentId, setAgentId] = useState<string | null>(null);
   const [handle, setHandle] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  const syncAgent = useCallback(async () => {
-    if (!authenticated) {
-      setAgentId(null);
-      setHandle(null);
-      setWalletAddress(null);
-      setIsLoading(false);
-      return;
-    }
-
-    setIsLoading(true);
-
+  // Restore session from localStorage on mount
+  useEffect(() => {
     try {
-      const token = await getAccessToken();
-      if (!token) {
-        setIsLoading(false);
-        return;
-      }
-
-      // Try to login (agent already registered)
-      const loginRes = await fetch("/api/v1/agents/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ privy_token: token }),
-      });
-
-      if (loginRes.ok) {
-        const data = await loginRes.json();
-        setAgentId(data.agent_id);
-        setHandle(data.handle);
-        setWalletAddress(data.wallet_address);
-        setIsLoading(false);
-        return;
-      }
-
-      // If 404, agent not registered — auto-register as human
-      if (loginRes.status === 404) {
-        const regRes = await fetch("/api/v1/agents/register", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            mode: "custodial",
-            privy_token: token,
-            actor_type: "human",
-          }),
-        });
-
-        if (regRes.ok) {
-          const data = await regRes.json();
-          setAgentId(data.agent_id);
-          setHandle(data.handle);
-          setWalletAddress(data.wallet_address);
-        }
+      const stored = localStorage.getItem(SESSION_KEY);
+      if (stored) {
+        const session: StoredSession = JSON.parse(stored);
+        setAccessToken(session.accessToken);
+        setAgentId(session.agentId);
+        setHandle(session.handle);
+        setWalletAddress(session.walletAddress);
       }
     } catch {
-      // Auth sync failed silently
+      localStorage.removeItem(SESSION_KEY);
     }
-
     setIsLoading(false);
-  }, [authenticated, getAccessToken]);
+  }, []);
 
-  useEffect(() => {
-    if (ready) {
-      syncAgent();
-    }
-  }, [ready, authenticated, syncAgent]);
+  const login = useCallback(() => {
+    window.location.href = "/login";
+  }, []);
 
-  const handleLogout = useCallback(async () => {
-    await privyLogout();
+  const setSession = useCallback(
+    (token: string, agent: { agentId: string; handle: string | null; walletAddress: string }) => {
+      setAccessToken(token);
+      setAgentId(agent.agentId);
+      setHandle(agent.handle);
+      setWalletAddress(agent.walletAddress);
+
+      const session: StoredSession = {
+        accessToken: token,
+        agentId: agent.agentId,
+        handle: agent.handle,
+        walletAddress: agent.walletAddress,
+      };
+      localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+    },
+    []
+  );
+
+  const logout = useCallback(() => {
+    setAccessToken(null);
     setAgentId(null);
     setHandle(null);
     setWalletAddress(null);
-  }, [privyLogout]);
+    localStorage.removeItem(SESSION_KEY);
+  }, []);
 
   const getToken = useCallback(async () => {
-    if (!authenticated) return null;
-    return getAccessToken();
-  }, [authenticated, getAccessToken]);
+    return accessToken;
+  }, [accessToken]);
 
   return (
     <AuthContext.Provider
@@ -133,10 +113,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         agentId,
         handle,
         walletAddress,
-        isAuthenticated: authenticated && !!agentId,
-        isLoading: !ready || isLoading,
+        accessToken,
+        isAuthenticated: !!accessToken && !!agentId,
+        isLoading,
         login,
-        logout: handleLogout,
+        setSession,
+        logout,
         getToken,
       }}
     >

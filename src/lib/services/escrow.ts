@@ -8,6 +8,7 @@ import {
   agents,
   submissionHistory,
   fileUploads,
+  tokenLaunches,
 } from "@/lib/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { updateReputation } from "./reputation";
@@ -30,6 +31,72 @@ import {
 } from "./state-machine";
 import { ESCROW_CONTRACT_ADDRESS, DEFAULT_DEADLINE_HOURS, DEFAULT_DISPUTE_WINDOW_HOURS } from "@/lib/bsc/constants";
 import type { SupportedToken } from "@/lib/bsc/constants";
+import { processPaymentWithBuyback, type BuybackResult } from "@/lib/bsc/buyback";
+
+/**
+ * Look up an agent's launched token address (Four.meme token).
+ * Returns the token address if the agent has a successfully launched token, null otherwise.
+ */
+async function getAgentTokenAddress(agentId: string): Promise<string | null> {
+  const [launch] = await db
+    .select({ tokenAddress: tokenLaunches.tokenAddress })
+    .from(tokenLaunches)
+    .where(
+      and(
+        eq(tokenLaunches.agentId, agentId),
+        eq(tokenLaunches.status, "launched")
+      )
+    )
+    .limit(1);
+  return launch?.tokenAddress || null;
+}
+
+/**
+ * Execute buyback-and-burn for a worker agent's token after escrow release.
+ * If the agent has a launched token, a % of the released payment is used to
+ * buy and burn their token via PancakeSwap (LiFi aggregator).
+ *
+ * Similar to Moltlaunch's BuybackBurned flow and Virtuals' agent token buyback.
+ *
+ * This is best-effort — if buyback fails, the payment still goes through.
+ */
+async function tryBuybackForAgent(
+  workerAgentId: string,
+  escrowAmount: string,
+  escrowId: string
+): Promise<BuybackResult | null> {
+  try {
+    const tokenAddress = await getAgentTokenAddress(workerAgentId);
+    if (!tokenAddress) return null; // No token — no buyback
+
+    const result = await processPaymentWithBuyback({
+      totalAmount: escrowAmount,
+      tokenAddress,
+    });
+
+    // Log the buyback result to the escrow record
+    if (result.swapTxHash || result.burnTxHash) {
+      await db
+        .update(escrows)
+        .set({
+          buybackTxHash: result.swapTxHash,
+          buybackBurnTxHash: result.burnTxHash,
+          buybackAmount: result.buybackAmount,
+          buybackTokensBurned: result.tokensBurned,
+          buybackTokenAddress: result.tokenAddress,
+        })
+        .where(eq(escrows.id, escrowId));
+    }
+
+    return result;
+  } catch (err) {
+    console.error(
+      `Buyback failed for agent ${workerAgentId}:`,
+      err instanceof Error ? err.message : err
+    );
+    return null; // Buyback failure is non-fatal
+  }
+}
 
 export async function awardJob(params: {
   jobId: string;
@@ -128,7 +195,7 @@ export async function awardJob(params: {
   // Create on-chain escrow from agent's own wallet
   if (ESCROW_CONTRACT_ADDRESS) {
     const [funder] = await db
-      .select({ walletAddress: agents.walletAddress, walletMode: agents.walletMode })
+      .select({ walletAddress: agents.walletAddress })
       .from(agents)
       .where(eq(agents.id, params.requesterAgentId));
     const [recipient] = await db
@@ -138,8 +205,7 @@ export async function awardJob(params: {
 
     if (funder?.walletAddress && recipient?.walletAddress) {
       try {
-        const escrowResult = await agentCreateEscrow({
-          walletMode: funder.walletMode as "custodial" | "non_custodial",
+        const escrowResult = agentCreateEscrow({
           walletAddress: funder.walletAddress,
           escrowId: result.escrow.id,
           sellerAddress: recipient.walletAddress,
@@ -149,18 +215,7 @@ export async function awardJob(params: {
           disputeWindowHours: DEFAULT_DISPUTE_WINDOW_HOURS,
         });
 
-        if (escrowResult.txHash) {
-          await db
-            .update(escrows)
-            .set({ onChainTxHash: escrowResult.txHash })
-            .where(eq(escrows.id, result.escrow.id));
-          result.escrow = { ...result.escrow, onChainTxHash: escrowResult.txHash };
-        }
-
-        // For non-custodial agents, return unsigned tx data
-        if (escrowResult.unsignedTx) {
-          (result as any).unsignedTx = escrowResult.unsignedTx;
-        }
+        (result as any).unsignedTx = escrowResult.unsignedTx;
       } catch {
         // Rollback: delete escrow record (no off-chain balance to restore)
         await db.delete(escrows).where(eq(escrows.id, result.escrow.id));
@@ -296,6 +351,7 @@ export async function acceptWork(params: {
       throw new Error("No submitted work to accept");
 
     const workerIds: string[] = [];
+    const releasedEscrows: { escrowId: string; workerAgentId: string; amount: string }[] = [];
 
     for (const assignment of submittedAssignments) {
       validateAssignmentTransition(
@@ -320,6 +376,11 @@ export async function acceptWork(params: {
           .update(escrows)
           .set({ status: "released", releasedAt: new Date(), releaseTxHash })
           .where(eq(escrows.id, escrow.id));
+        releasedEscrows.push({
+          escrowId: escrow.id,
+          workerAgentId: assignment.workerAgentId,
+          amount: escrow.amount,
+        });
       }
 
       // Update assignment status
@@ -363,9 +424,17 @@ export async function acceptWork(params: {
     return {
       accepted: submittedAssignments.length,
       workerIds,
+      releasedEscrows,
       jobTitle: job.title,
     };
   });
+
+  // Post-tx: buyback-and-burn for agents with tokens (best-effort, non-blocking)
+  for (const esc of result.releasedEscrows) {
+    tryBuybackForAgent(esc.workerAgentId, esc.amount, esc.escrowId).catch(() => {
+      // Buyback is best-effort — failure does not affect the payment
+    });
+  }
 
   // Post-tx: reputation recalc + on-chain feedback + feed event
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://datalayer-market.fly.dev";
@@ -421,6 +490,13 @@ export async function releaseEscrow(escrowId: string) {
       .returning();
     return updated;
   });
+
+  // Trigger buyback-and-burn for agents with tokens (best-effort)
+  if (esc?.recipientAgentId) {
+    tryBuybackForAgent(esc.recipientAgentId, esc.amount, esc.id).catch(() => {
+      // Buyback is best-effort
+    });
+  }
 
   return esc;
 }
@@ -572,9 +648,9 @@ export async function createOnChainEscrow(params: {
     throw new Error("On-chain escrow contract not configured");
   }
 
-  // Look up wallet addresses and mode
+  // Look up wallet addresses
   const [funder] = await db
-    .select({ walletAddress: agents.walletAddress, walletMode: agents.walletMode })
+    .select({ walletAddress: agents.walletAddress })
     .from(agents)
     .where(eq(agents.id, params.funderAgentId));
   if (!funder?.walletAddress) throw new Error("Funder wallet not found");
@@ -607,9 +683,8 @@ export async function createOnChainEscrow(params: {
     .returning();
 
   try {
-    // Create on-chain escrow from agent's own wallet
-    const escrowResult = await agentCreateEscrow({
-      walletMode: funder.walletMode as "custodial" | "non_custodial",
+    // Create on-chain escrow - returns unsigned tx for agent to sign
+    const escrowResult = agentCreateEscrow({
       walletAddress: funder.walletAddress,
       escrowId: escrow.id,
       sellerAddress: recipient.walletAddress,
@@ -619,15 +694,6 @@ export async function createOnChainEscrow(params: {
       disputeWindowHours: params.disputeWindowHours || DEFAULT_DISPUTE_WINDOW_HOURS,
     });
 
-    if (escrowResult.txHash) {
-      await db
-        .update(escrows)
-        .set({ onChainTxHash: escrowResult.txHash })
-        .where(eq(escrows.id, escrow.id));
-      return { ...escrow, onChainTxHash: escrowResult.txHash };
-    }
-
-    // Non-custodial: return unsigned tx data for agent to sign
     return { ...escrow, unsignedTx: escrowResult.unsignedTx };
   } catch (err) {
     // Rollback: delete DB record (no off-chain balance to restore)

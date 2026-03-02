@@ -47,49 +47,33 @@ export const paginationSchema = z.object({
 
 export const challengeSchema = z.object({
   wallet_address: bscAddress,
+  action: z.enum(["register", "login"]).default("register"),
 });
 
-export const registerAgentSchema = z.discriminatedUnion("mode", [
-  // Non-custodial registration (BYOW)
-  z.object({
-    mode: z.literal("non_custodial"),
-    wallet_address: bscAddress,
-    signature: hexSignature,
-    nonce: z.string().uuid("Invalid nonce format"),
-    handle: z
-      .string()
-      .regex(/^[a-z0-9_]+$/, "Lowercase alphanumeric only")
-      .min(3)
-      .max(20)
-      .optional(),
-    description: z.string().max(5000).optional(),
-    tags: z.array(z.string().max(50)).max(10).optional(),
-    skill_tags: z.array(z.string().max(50)).max(20).optional(),
-    capabilities: z.record(z.string(), z.unknown()).optional(),
-    actor_type: z.enum(["human", "agent"]).default("agent"),
-    webhook_url: z.string().url().max(512).optional(),
-    mcp_endpoint: z.string().url().max(512).optional(),
-  }),
-  // Custodial registration (Privy-managed)
-  z.object({
-    mode: z.literal("custodial"),
-    privy_token: z.string().min(1, "Privy access token required"),
-    email: z.string().email().optional(),
-    handle: z
-      .string()
-      .regex(/^[a-z0-9_]+$/, "Lowercase alphanumeric only")
-      .min(3)
-      .max(20)
-      .optional(),
-    description: z.string().max(5000).optional(),
-    tags: z.array(z.string().max(50)).max(10).optional(),
-    skill_tags: z.array(z.string().max(50)).max(20).optional(),
-    capabilities: z.record(z.string(), z.unknown()).optional(),
-    actor_type: z.enum(["human", "agent"]).default("agent"),
-    webhook_url: z.string().url().max(512).optional(),
-    mcp_endpoint: z.string().url().max(512).optional(),
-  }),
-]);
+export const registerAgentSchema = z.object({
+  wallet_address: bscAddress,
+  signature: hexSignature,
+  nonce: z.string().uuid("Invalid nonce format"),
+  handle: z
+    .string()
+    .regex(/^[a-z0-9_]+$/, "Lowercase alphanumeric only")
+    .min(3)
+    .max(20)
+    .optional(),
+  description: z.string().max(5000).optional(),
+  tags: z.array(z.string().max(50)).max(10).optional(),
+  skill_tags: z.array(z.string().max(50)).max(20).optional(),
+  capabilities: z.record(z.string(), z.unknown()).optional(),
+  actor_type: z.enum(["human", "agent"]).default("agent"),
+  webhook_url: z.string().url().max(512).optional(),
+  mcp_endpoint: z.string().url().max(512).optional(),
+});
+
+export const loginSchema = z.object({
+  wallet_address: bscAddress,
+  signature: hexSignature,
+  nonce: z.string().uuid("Invalid nonce format"),
+});
 
 export const updateAgentSchema = z.object({
   handle: z

@@ -3,22 +3,21 @@ import { db } from "@/lib/db";
 import { agents, apiKeys } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { verifyApiKey } from "./api-key";
-import { verifyPrivyToken } from "./privy";
+import { verifySessionToken } from "./jwt";
 import type { Scope } from "./scopes";
 
 export interface AgentAuth {
   agentId: string;
   walletAddress: string | null;
-  walletMode: "custodial" | "non_custodial";
   handle: string | null;
   scopes: string[];
 }
 
 /**
  * Authenticate via Bearer token.
- * Supports two modes:
- *   1. API Key (sk_live_*) — looks up in api_keys table
- *   2. Privy JWT — verifies via Privy SDK, finds agent by privyUserId
+ * Supports two paths:
+ *   1. API key (sk_live_*) — permanent, for programmatic access
+ *   2. JWT session (eyJ*) — 24h expiry, for web UI sessions
  */
 export async function authenticateAgent(
   req: NextRequest
@@ -28,13 +27,43 @@ export async function authenticateAgent(
 
   const token = authHeader.slice(7);
 
-  // Mode 1: API Key authentication
+  // Path 1: API key
   if (token.startsWith("sk_live_")) {
     return authenticateWithApiKey(token);
   }
 
-  // Mode 2: Privy JWT authentication (custodial agents)
-  return authenticateWithPrivy(token);
+  // Path 2: JWT session token
+  if (token.startsWith("eyJ")) {
+    return authenticateWithJwt(token);
+  }
+
+  return null;
+}
+
+async function authenticateWithJwt(
+  token: string
+): Promise<AgentAuth | null> {
+  const payload = await verifySessionToken(token);
+  if (!payload) return null;
+
+  // Verify agent still exists
+  const [agent] = await db
+    .select({
+      id: agents.id,
+      walletAddress: agents.walletAddress,
+      handle: agents.handle,
+    })
+    .from(agents)
+    .where(eq(agents.id, payload.agentId));
+
+  if (!agent) return null;
+
+  return {
+    agentId: agent.id,
+    walletAddress: agent.walletAddress,
+    handle: agent.handle,
+    scopes: payload.scopes,
+  };
 }
 
 async function authenticateWithApiKey(
@@ -72,7 +101,6 @@ async function authenticateWithApiKey(
       .select({
         id: agents.id,
         walletAddress: agents.walletAddress,
-        walletMode: agents.walletMode,
         handle: agents.handle,
       })
       .from(agents)
@@ -83,7 +111,6 @@ async function authenticateWithApiKey(
     return {
       agentId: agent.id,
       walletAddress: agent.walletAddress,
-      walletMode: agent.walletMode,
       handle: agent.handle,
       scopes: k.scopes as string[],
     };
@@ -102,7 +129,6 @@ async function authenticateWithApiKey(
       return {
         agentId: agent.id,
         walletAddress: agent.walletAddress,
-        walletMode: agent.walletMode,
         handle: agent.handle,
         scopes: ["read", "write", "financial"],
       };
@@ -110,36 +136,6 @@ async function authenticateWithApiKey(
   }
 
   return null;
-}
-
-async function authenticateWithPrivy(
-  token: string
-): Promise<AgentAuth | null> {
-  try {
-    const { privyId } = await verifyPrivyToken(token);
-
-    const [agent] = await db
-      .select({
-        id: agents.id,
-        walletAddress: agents.walletAddress,
-        walletMode: agents.walletMode,
-        handle: agents.handle,
-      })
-      .from(agents)
-      .where(eq(agents.privyUserId, privyId));
-
-    if (!agent) return null;
-
-    return {
-      agentId: agent.id,
-      walletAddress: agent.walletAddress,
-      walletMode: agent.walletMode,
-      handle: agent.handle,
-      scopes: ["read", "write", "financial"],
-    };
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -168,32 +164,6 @@ export async function requireScope(
     return forbidden(`Insufficient scope. Required: ${scope}`);
   }
   return auth;
-}
-
-/**
- * Require custodial wallet mode.
- */
-export function requireCustodial(auth: AgentAuth): NextResponse | null {
-  if (auth.walletMode !== "custodial") {
-    return NextResponse.json(
-      { error: "This endpoint is only available for custodial wallets" },
-      { status: 403 }
-    );
-  }
-  return null;
-}
-
-/**
- * Require non-custodial wallet mode.
- */
-export function requireNonCustodial(auth: AgentAuth): NextResponse | null {
-  if (auth.walletMode !== "non_custodial") {
-    return NextResponse.json(
-      { error: "This endpoint is only available for non-custodial wallets" },
-      { status: 403 }
-    );
-  }
-  return null;
 }
 
 // Response helpers

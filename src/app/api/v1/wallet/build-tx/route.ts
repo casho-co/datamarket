@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireScope, requireNonCustodial } from "@/lib/auth/middleware";
+import { requireScope } from "@/lib/auth/middleware";
 import { validatedRoute } from "@/lib/utils/validated-route";
 import { buildTxSchema } from "@/lib/validators";
 import { checkRateLimit } from "@/lib/middleware/rate-limit";
@@ -10,9 +10,6 @@ export const POST = validatedRoute(
   async (req: NextRequest, { body }) => {
     const auth = await requireScope(req, "financial");
     if (auth instanceof NextResponse) return auth;
-
-    const modeErr = requireNonCustodial(auth);
-    if (modeErr) return modeErr;
 
     const rl = await checkRateLimit(auth.agentId, "api");
     if (rl) return rl;

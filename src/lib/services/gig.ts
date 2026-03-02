@@ -7,6 +7,7 @@ import {
   reputation,
   submissionHistory,
   fileUploads,
+  tokenLaunches,
 } from "@/lib/db/schema";
 import { eq, and, sql, desc, ilike, or } from "drizzle-orm";
 import { checkSufficientBalance } from "./wallet";
@@ -20,8 +21,72 @@ import {
   oracleRefund as onChainRefund,
 } from "@/lib/bsc/escrow-contract";
 import { ESCROW_CONTRACT_ADDRESS, DEFAULT_DEADLINE_HOURS, DEFAULT_DISPUTE_WINDOW_HOURS } from "@/lib/bsc/constants";
+import { processPaymentWithBuyback, type BuybackResult } from "@/lib/bsc/buyback";
 
 const DEFAULT_AUTO_RELEASE_DAYS = 7;
+
+/**
+ * Look up an agent's launched token address (Four.meme token).
+ * Returns the token address if the agent has a successfully launched token, null otherwise.
+ */
+async function getAgentTokenAddress(agentId: string): Promise<string | null> {
+  const [launch] = await db
+    .select({ tokenAddress: tokenLaunches.tokenAddress })
+    .from(tokenLaunches)
+    .where(
+      and(
+        eq(tokenLaunches.agentId, agentId),
+        eq(tokenLaunches.status, "launched")
+      )
+    )
+    .limit(1);
+  return launch?.tokenAddress || null;
+}
+
+/**
+ * Execute buyback-and-burn for a worker agent's token after escrow release.
+ * If the agent has a launched token, a % of the released payment is used to
+ * buy and burn their token via PancakeSwap (LiFi aggregator).
+ *
+ * This is best-effort — if buyback fails, the payment still goes through.
+ */
+async function tryBuybackForAgent(
+  workerAgentId: string,
+  escrowAmount: string,
+  escrowId: string
+): Promise<BuybackResult | null> {
+  try {
+    const tokenAddress = await getAgentTokenAddress(workerAgentId);
+    if (!tokenAddress) return null; // No token — no buyback
+
+    const result = await processPaymentWithBuyback({
+      totalAmount: escrowAmount,
+      tokenAddress,
+    });
+
+    // Log the buyback result to the escrow record
+    if (result.swapTxHash || result.burnTxHash) {
+      await db
+        .update(escrows)
+        .set({
+          buybackTxHash: result.swapTxHash,
+          buybackBurnTxHash: result.burnTxHash,
+          buybackAmount: result.buybackAmount,
+          buybackTokensBurned: result.tokensBurned,
+          buybackTokenAddress: result.tokenAddress,
+        })
+        .where(eq(escrows.id, escrowId));
+    }
+
+    return result;
+  } catch (err) {
+    console.error(
+      `Buyback failed for agent ${workerAgentId}:`,
+      err instanceof Error ? err.message : err
+    );
+    return null; // Buyback failure is non-fatal
+  }
+}
 
 // ── Create Gig ──
 
@@ -163,7 +228,7 @@ export async function orderGig(params: {
   // Create on-chain escrow from buyer's own wallet
   if (ESCROW_CONTRACT_ADDRESS && result.escrow) {
     const [funder] = await db
-      .select({ walletAddress: agents.walletAddress, walletMode: agents.walletMode })
+      .select({ walletAddress: agents.walletAddress })
       .from(agents)
       .where(eq(agents.id, params.buyerAgentId));
     const [recipient] = await db
@@ -173,8 +238,7 @@ export async function orderGig(params: {
 
     if (funder?.walletAddress && recipient?.walletAddress) {
       try {
-        const escrowResult = await agentCreateEscrow({
-          walletMode: funder.walletMode as "custodial" | "non_custodial",
+        const escrowResult = agentCreateEscrow({
           walletAddress: funder.walletAddress,
           escrowId: result.escrow.id,
           sellerAddress: recipient.walletAddress,
@@ -183,12 +247,6 @@ export async function orderGig(params: {
           deadlineHours: DEFAULT_DEADLINE_HOURS,
           disputeWindowHours: DEFAULT_DISPUTE_WINDOW_HOURS,
         });
-        if (escrowResult.txHash) {
-          await db
-            .update(escrows)
-            .set({ onChainTxHash: escrowResult.txHash })
-            .where(eq(escrows.id, result.escrow.id));
-        }
       } catch {
         await db.delete(escrows).where(eq(escrows.id, result.escrow.id));
         throw new Error("Failed to create on-chain escrow");
@@ -293,6 +351,7 @@ export async function acceptGigDelivery(params: {
     validateGigOrderTransition(order.status, "completed", order.id);
 
     // Release escrow on-chain
+    let releasedEscrow: { id: string; amount: string } | null = null;
     if (order.escrowId) {
       const [escrow] = await tx
         .select()
@@ -309,6 +368,7 @@ export async function acceptGigDelivery(params: {
           .update(escrows)
           .set({ status: "released", releasedAt: new Date(), releaseTxHash })
           .where(eq(escrows.id, escrow.id));
+        releasedEscrow = { id: escrow.id, amount: escrow.amount };
 
         await tx
           .update(reputation)
@@ -326,8 +386,19 @@ export async function acceptGigDelivery(params: {
       .set({ status: "completed", completedAt: new Date() })
       .where(eq(gigOrders.id, params.orderId));
 
-    return { order };
+    return { order, releasedEscrow };
   });
+
+  // Post-tx: buyback-and-burn for seller agent's token (best-effort, non-blocking)
+  if (result.releasedEscrow) {
+    tryBuybackForAgent(
+      result.order.sellerAgentId,
+      result.releasedEscrow.amount,
+      result.releasedEscrow.id
+    ).catch(() => {
+      // Buyback is best-effort — failure does not affect the payment
+    });
+  }
 
   await updateReputation(result.order.sellerAgentId);
 
