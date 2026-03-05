@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
       tags: body.tags,
       budgetAmount: body.budget_amount,
       jobType: body.job_type,
-      maxSlots: body.max_slots,
+      // maxSlots: body.max_slots, // MVP: always 1 agent per job
       deadlineSeconds: body.deadline_seconds,
       disputeAgentId: body.dispute_agent_id,
       requiresVerifiable: body.requires_verifiable,

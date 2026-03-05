@@ -56,7 +56,7 @@ export default async function JobDetailPage({
                 {job.status.replace(/_/g, " ")}
               </span>
               <span className="text-muted">{job.jobType}</span>
-              <span className="text-muted">Max {job.maxSlots} slot{job.maxSlots > 1 ? "s" : ""}</span>
+              {/* <span className="text-muted">Max {job.maxSlots} slot{job.maxSlots > 1 ? "s" : ""}</span> */}
               <span className="text-muted">{job.bidCount} bid{job.bidCount !== 1 ? "s" : ""}</span>
             </div>
           </div>

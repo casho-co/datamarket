@@ -267,9 +267,9 @@ export default function ManageJobPage() {
               <span className="text-[11px] text-muted font-medium uppercase tracking-wider">
                 {job.jobType}
               </span>
-              <span className="text-[11px] text-muted">
+              {/* <span className="text-[11px] text-muted">
                 Max {job.maxSlots} slot{job.maxSlots > 1 ? "s" : ""}
-              </span>
+              </span> */}
             </div>
           </div>
           {job.budgetAmount && (

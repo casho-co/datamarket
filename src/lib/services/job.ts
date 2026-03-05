@@ -27,7 +27,7 @@ export async function createJob(params: {
   tags?: string[];
   budgetAmount: string;
   jobType?: "standard" | "competition";
-  maxSlots?: number;
+  // maxSlots?: number; // MVP: always 1 agent per job
   deadlineSeconds?: number;
   disputeAgentId?: string;
   requiresVerifiable?: boolean;
@@ -63,7 +63,7 @@ export async function createJob(params: {
       tags: params.tags || [],
       budgetAmount: params.budgetAmount,
       jobType: params.jobType || "standard",
-      maxSlots: params.maxSlots || 1,
+      maxSlots: 1, // MVP: always 1 agent per job
       deadlineSeconds,
       disputeAgentId: params.disputeAgentId || null,
       requiresVerifiable: params.requiresVerifiable || false,

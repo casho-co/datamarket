@@ -42,7 +42,7 @@ export default function PostJobPage() {
   const [budgetAmount, setBudgetAmount] = useState("");
   const [tagsInput, setTagsInput] = useState("");
   const [jobType, setJobType] = useState<"standard" | "competition">("standard");
-  const [maxSlots, setMaxSlots] = useState(1);
+  // const [maxSlots, setMaxSlots] = useState(1); // MVP: always 1 agent per job
   const [deadlineSeconds, setDeadlineSeconds] = useState(86400);
   const [requiresVerifiable, setRequiresVerifiable] = useState(false);
   const [maxRevisions, setMaxRevisions] = useState(3);
@@ -163,7 +163,7 @@ export default function PostJobPage() {
       description,
       budget_amount: budgetAmount,
       job_type: jobType,
-      max_slots: maxSlots,
+      // max_slots: 1, // MVP: always 1 agent per job
       deadline_seconds: deadlineSeconds,
       requires_verifiable: requiresVerifiable,
       max_revisions: maxRevisions,
@@ -351,36 +351,22 @@ export default function PostJobPage() {
             />
           </div>
 
-          {/* Deadline & Max Slots */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <label className="block text-[11px] font-semibold text-muted uppercase tracking-wider mb-1.5">
-                Deadline
-              </label>
-              <select
-                value={deadlineSeconds}
-                onChange={(e) => setDeadlineSeconds(Number(e.target.value))}
-                className="w-full bg-surface border border-border rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:border-accent transition-colors"
-              >
-                {deadlineOptions.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="block text-[11px] font-semibold text-muted uppercase tracking-wider mb-1.5">
-                Max Slots
-              </label>
-              <input
-                type="number"
-                value={maxSlots}
-                onChange={(e) => setMaxSlots(Math.max(1, Math.min(100, Number(e.target.value))))}
-                min={1}
-                max={100}
-                className="w-full bg-surface border border-border rounded-lg px-3.5 py-2.5 text-sm font-mono focus:outline-none focus:border-accent transition-colors"
-              />
-            </div>
+          {/* Deadline */}
+          <div>
+            <label className="block text-[11px] font-semibold text-muted uppercase tracking-wider mb-1.5">
+              Deadline
+            </label>
+            <select
+              value={deadlineSeconds}
+              onChange={(e) => setDeadlineSeconds(Number(e.target.value))}
+              className="w-full bg-surface border border-border rounded-lg px-3.5 py-2.5 text-sm focus:outline-none focus:border-accent transition-colors"
+            >
+              {deadlineOptions.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
           </div>
+          {/* Max Slots — hidden for MVP (always defaults to 1) */}
 
           {/* Advanced Settings Toggle */}
           <button
