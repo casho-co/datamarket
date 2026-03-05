@@ -5,6 +5,7 @@ import {
   reputation,
   assignments,
   bids,
+  escrows,
 } from "@/lib/db/schema";
 import {
   eq,
@@ -16,9 +17,9 @@ import {
   sql,
 } from "drizzle-orm";
 import { emitFeedEvent } from "./feed";
-import { checkSufficientBalance } from "./wallet";
-import { verifyUSDCTransfer } from "@/lib/bsc/usdc";
+import { verifyUSDCTransfer, transferUSDC } from "@/lib/bsc/usdc";
 import { PLATFORM_BSC_ADDRESS } from "@/lib/bsc/constants";
+import { validateEscrowTransition } from "./state-machine";
 
 export async function createJob(params: {
   creatorAgentId: string;
@@ -27,31 +28,22 @@ export async function createJob(params: {
   tags?: string[];
   budgetAmount: string;
   jobType?: "standard" | "competition";
-  // maxSlots?: number; // MVP: always 1 agent per job
   deadlineSeconds?: number;
   disputeAgentId?: string;
   requiresVerifiable?: boolean;
   maxRevisions?: number;
   autoReleaseDays?: number;
-  paymentTxHash?: string;
+  paymentTxHash: string;
 }) {
   const deadlineSeconds = params.deadlineSeconds || 86400;
   const expiresAt = new Date(Date.now() + deadlineSeconds * 1000);
 
-  if (params.paymentTxHash) {
-    // Wallet-connected user already paid on-chain — verify the USDC transfer
-    const verified = await verifyUSDCTransfer(params.paymentTxHash, params.budgetAmount, {
-      expectedTo: PLATFORM_BSC_ADDRESS || undefined,
-    });
-    if (!verified) {
-      throw new Error("On-chain USDC payment could not be verified. Check the transaction and try again.");
-    }
-  } else {
-    // API key user: verify sufficient on-chain USDC balance (actual locking happens at escrow creation)
-    const hasFunds = await checkSufficientBalance(params.creatorAgentId, params.budgetAmount);
-    if (!hasFunds) {
-      throw new Error("Insufficient on-chain USDC balance");
-    }
+  // Verify the USDC transfer to platform wallet (required for all users)
+  const verified = await verifyUSDCTransfer(params.paymentTxHash, params.budgetAmount, {
+    expectedTo: PLATFORM_BSC_ADDRESS || undefined,
+  });
+  if (!verified) {
+    throw new Error("On-chain USDC payment could not be verified. Check the transaction and try again.");
   }
 
   const [job] = await db
@@ -63,13 +55,25 @@ export async function createJob(params: {
       tags: params.tags || [],
       budgetAmount: params.budgetAmount,
       jobType: params.jobType || "standard",
-      maxSlots: 1, // MVP: always 1 agent per job
       deadlineSeconds,
       disputeAgentId: params.disputeAgentId || null,
       requiresVerifiable: params.requiresVerifiable || false,
       maxRevisions: params.maxRevisions ?? 3,
       autoReleaseDays: params.autoReleaseDays ?? 7,
       expiresAt,
+    })
+    .returning();
+
+  // Create escrow record — funds are now at platform wallet
+  const [escrow] = await db
+    .insert(escrows)
+    .values({
+      jobId: job.id,
+      funderAgentId: params.creatorAgentId,
+      recipientAgentId: null,
+      amount: params.budgetAmount,
+      escrowType: "on_chain",
+      fundingTxHash: params.paymentTxHash,
     })
     .returning();
 
@@ -90,7 +94,7 @@ export async function createJob(params: {
     job_type: job.jobType,
   });
 
-  return job;
+  return { ...job, escrowId: escrow.id };
 }
 
 export async function getJobById(jobId: string) {
@@ -141,7 +145,6 @@ export async function listJobs(params: {
       budgetToken: jobs.budgetToken,
       jobType: jobs.jobType,
       status: jobs.status,
-      maxSlots: jobs.maxSlots,
       deadlineSeconds: jobs.deadlineSeconds,
       expiresAt: jobs.expiresAt,
       createdAt: jobs.createdAt,
@@ -189,7 +192,7 @@ export async function listJobs(params: {
 
 export async function updateJobStatus(
   jobId: string,
-  status: "open" | "filling" | "in_progress" | "completed" | "closed" | "expired" | "judging"
+  status: "open" | "in_progress" | "completed" | "closed" | "expired" | "judging"
 ) {
   const [job] = await db
     .update(jobs)
@@ -203,10 +206,42 @@ export async function cancelJob(jobId: string, agentId: string) {
   const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
   if (!job) return null;
   if (job.creatorAgentId !== agentId) return null;
-  if (!["open", "filling"].includes(job.status)) return null;
+  if (job.status !== "open") return null;
 
-  // No off-chain balance to refund — funds are in agent's own wallet.
-  // On-chain escrow refunds happen separately if escrows exist.
+  // Refund the escrow — USDC is at platform wallet, send back to creator
+  const [escrow] = await db
+    .select()
+    .from(escrows)
+    .where(and(eq(escrows.jobId, jobId), eq(escrows.status, "funded")));
+
+  if (escrow) {
+    // Look up creator's wallet address for refund
+    const [creator] = await db
+      .select({ walletAddress: agents.walletAddress })
+      .from(agents)
+      .where(eq(agents.id, agentId));
+
+    if (creator?.walletAddress) {
+      if (escrow.onChainTxHash) {
+        // On-chain escrow exists (shouldn't happen for "open" jobs, but safety)
+        const { oracleRefund } = await import("@/lib/bsc/escrow-contract");
+        const refundTxHash = await oracleRefund(escrow.id);
+        await db
+          .update(escrows)
+          .set({ status: "refunded", refundedAt: new Date(), releaseTxHash: refundTxHash })
+          .where(eq(escrows.id, escrow.id));
+      } else {
+        // Pre-award: USDC at platform wallet, transfer back to creator
+        validateEscrowTransition(escrow.status, "refunded", escrow.id);
+        await transferUSDC(creator.walletAddress, escrow.amount);
+        await db
+          .update(escrows)
+          .set({ status: "refunded", refundedAt: new Date() })
+          .where(eq(escrows.id, escrow.id));
+      }
+    }
+  }
+
   const [updated] = await db
     .update(jobs)
     .set({ status: "closed", updatedAt: new Date() })

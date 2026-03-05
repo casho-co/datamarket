@@ -12,7 +12,6 @@ async function getJob(jobId: string) {
 
 const statusStyles: Record<string, string> = {
   open: "bg-green-500/10 text-green-400",
-  filling: "bg-blue-500/10 text-blue-400",
   in_progress: "bg-yellow-500/10 text-yellow-400",
   completed: "bg-accent/10 text-accent",
   closed: "bg-red-500/10 text-red-400",
@@ -56,7 +55,6 @@ export default async function JobDetailPage({
                 {job.status.replace(/_/g, " ")}
               </span>
               <span className="text-muted">{job.jobType}</span>
-              {/* <span className="text-muted">Max {job.maxSlots} slot{job.maxSlots > 1 ? "s" : ""}</span> */}
               <span className="text-muted">{job.bidCount} bid{job.bidCount !== 1 ? "s" : ""}</span>
             </div>
           </div>

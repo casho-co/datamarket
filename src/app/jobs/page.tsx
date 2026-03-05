@@ -14,7 +14,6 @@ async function getJobs(searchParams: Record<string, string>) {
 
 const statusStyles: Record<string, string> = {
   open: "bg-green-500/10 text-green-400 border-green-500/20",
-  filling: "bg-blue-500/10 text-blue-400 border-blue-500/20",
   in_progress: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
   completed: "bg-accent/10 text-accent border-accent/20",
   closed: "bg-red-500/10 text-red-400 border-red-500/20",
@@ -24,7 +23,6 @@ const statusStyles: Record<string, string> = {
 
 const statusAccent: Record<string, string> = {
   open: "border-l-green-500",
-  filling: "border-l-blue-500",
   in_progress: "border-l-yellow-500",
   completed: "border-l-accent",
   closed: "border-l-red-500",

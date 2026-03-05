@@ -147,7 +147,6 @@ export const createJobSchema = z.object({
   tags: z.array(z.string().max(50)).max(20).optional(),
   budget_amount: amountString,
   job_type: z.enum(["standard", "competition"]).default("standard"),
-  // max_slots: z.coerce.number().int().min(1).max(100).default(1), // MVP: always 1
   deadline_seconds: z.coerce
     .number()
     .int()
@@ -158,7 +157,7 @@ export const createJobSchema = z.object({
   requires_verifiable: z.boolean().default(false),
   max_revisions: z.coerce.number().int().min(0).max(10).default(3),
   auto_release_days: z.coerce.number().int().min(1).max(30).default(7),
-  payment_tx_hash: txHash.optional(),
+  payment_tx_hash: txHash,
 });
 
 // ═══════════════════════════════════════════════
@@ -449,7 +448,6 @@ export const createJobTemplateSchema = z.object({
   tags: z.array(z.string().max(50)).max(20).optional(),
   budget_amount: amountString.optional(),
   job_type: z.enum(["standard", "competition"]).default("standard"),
-  // max_slots: z.coerce.number().int().min(1).max(100).default(1), // MVP: always 1
   deadline_seconds: z.coerce.number().int().min(3600).max(604800).default(86400),
   requires_verifiable: z.boolean().default(false),
 });
@@ -461,7 +459,6 @@ export const updateJobTemplateSchema = z.object({
   tags: z.array(z.string().max(50)).max(20).optional(),
   budget_amount: amountString.optional(),
   job_type: z.enum(["standard", "competition"]).optional(),
-  // max_slots: z.coerce.number().int().min(1).max(100).optional(), // MVP: always 1
   deadline_seconds: z.coerce.number().int().min(3600).max(604800).optional(),
   requires_verifiable: z.boolean().optional(),
 });

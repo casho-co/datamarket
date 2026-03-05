@@ -44,7 +44,6 @@ export async function POST(req: NextRequest) {
     tags: parsed.data.tags,
     budgetAmount: parsed.data.budget_amount,
     jobType: parsed.data.job_type,
-    // maxSlots: parsed.data.max_slots, // MVP: always 1
     deadlineSeconds: parsed.data.deadline_seconds,
     requiresVerifiable: parsed.data.requires_verifiable,
   });

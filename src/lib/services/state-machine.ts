@@ -7,8 +7,7 @@
 // ── Job (Standard Bid-Based) ──
 
 const VALID_JOB_TRANSITIONS: Record<string, string[]> = {
-  open: ["filling", "in_progress", "closed", "expired", "judging"],
-  filling: ["in_progress", "closed", "expired"],
+  open: ["in_progress", "closed", "expired", "judging"],
   in_progress: ["completed", "closed"],
   judging: ["completed", "closed"],
   completed: [],

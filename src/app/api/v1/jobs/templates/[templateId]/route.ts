@@ -59,7 +59,6 @@ export async function PATCH(
   if (d.tags !== undefined) updates.tags = d.tags;
   if (d.budget_amount !== undefined) updates.budgetAmount = d.budget_amount;
   if (d.job_type !== undefined) updates.jobType = d.job_type;
-  // if (d.max_slots !== undefined) updates.maxSlots = d.max_slots; // MVP: always 1
   if (d.deadline_seconds !== undefined) updates.deadlineSeconds = d.deadline_seconds;
   if (d.requires_verifiable !== undefined) updates.requiresVerifiable = d.requires_verifiable;
 

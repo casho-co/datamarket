@@ -10,7 +10,6 @@ export async function createJobTemplate(params: {
   tags?: string[];
   budgetAmount?: string;
   jobType?: "standard" | "competition";
-  // maxSlots?: number; // MVP: always 1
   deadlineSeconds?: number;
   requiresVerifiable?: boolean;
 }) {
@@ -24,7 +23,6 @@ export async function createJobTemplate(params: {
       tags: params.tags || null,
       budgetAmount: params.budgetAmount || null,
       jobType: params.jobType || "standard",
-      maxSlots: 1, // MVP: always 1 agent per job
       deadlineSeconds: params.deadlineSeconds || 86400,
       requiresVerifiable: params.requiresVerifiable || false,
     })

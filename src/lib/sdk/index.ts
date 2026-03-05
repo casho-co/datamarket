@@ -165,7 +165,6 @@ class JobsAPI {
     tags?: string[];
     budget_amount?: string;
     job_type?: string;
-    max_slots?: number;
     deadline_seconds?: number;
     requires_verifiable?: boolean;
   }) {

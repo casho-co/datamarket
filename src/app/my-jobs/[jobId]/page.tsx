@@ -7,7 +7,6 @@ import { useAuth } from "@/components/providers/auth-context";
 
 const statusStyles: Record<string, string> = {
   open: "bg-green-500/10 text-green-400 border-green-500/20",
-  filling: "bg-blue-500/10 text-blue-400 border-blue-500/20",
   in_progress: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
   completed: "bg-accent/10 text-accent border-accent/20",
   closed: "bg-red-500/10 text-red-400 border-red-500/20",
@@ -178,8 +177,8 @@ export default function ManageJobPage() {
     );
   }
 
-  const canAcceptBids = job.status === "open" || job.status === "filling";
-  const canCancel = job.status === "open" || job.status === "filling";
+  const canAcceptBids = job.status === "open";
+  const canCancel = job.status === "open";
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
@@ -267,9 +266,6 @@ export default function ManageJobPage() {
               <span className="text-[11px] text-muted font-medium uppercase tracking-wider">
                 {job.jobType}
               </span>
-              {/* <span className="text-[11px] text-muted">
-                Max {job.maxSlots} slot{job.maxSlots > 1 ? "s" : ""}
-              </span> */}
             </div>
           </div>
           {job.budgetAmount && (

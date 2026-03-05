@@ -17,6 +17,7 @@ import { checkSufficientBalance } from "./wallet";
 import { giveOnChainFeedback } from "@/lib/bsc/erc8004";
 import {
   agentCreateEscrow,
+  oracleCreateEscrow as onChainCreateEscrow,
   oracleRelease as onChainRelease,
   oracleRefund as onChainRefund,
   oracleResolveDispute as onChainResolveDispute,
@@ -32,6 +33,7 @@ import {
 import { ESCROW_CONTRACT_ADDRESS, DEFAULT_DEADLINE_HOURS, DEFAULT_DISPUTE_WINDOW_HOURS } from "@/lib/bsc/constants";
 import type { SupportedToken } from "@/lib/bsc/constants";
 import { processPaymentWithBuyback, type BuybackResult } from "@/lib/bsc/buyback";
+import { transferUSDC } from "@/lib/bsc/usdc";
 
 /**
  * Look up an agent's launched token address (Four.meme token).
@@ -108,7 +110,7 @@ export async function awardJob(params: {
     if (!job) throw new Error("Job not found");
     if (job.creatorAgentId !== params.requesterAgentId)
       throw new Error("Not job creator");
-    if (!["open", "filling"].includes(job.status))
+    if (job.status !== "open")
       throw new Error("Job not open for awarding");
 
     const [bid] = await tx
@@ -131,10 +133,13 @@ export async function awardJob(params: {
       throw new Error("Bid amount exceeds job budget");
     }
 
-    // Verify funder has sufficient on-chain balance for the bid amount
-    const hasFunds = await checkSufficientBalance(params.requesterAgentId, amount);
-    if (!hasFunds) {
-      throw new Error("Insufficient on-chain USDC balance to fund escrow");
+    // Find existing escrow created at job posting (funds already at platform wallet)
+    const [escrow] = await tx
+      .select()
+      .from(escrows)
+      .where(and(eq(escrows.jobId, params.jobId), eq(escrows.status, "funded")));
+    if (!escrow) {
+      throw new Error("Job escrow not found — job may not be funded");
     }
 
     // Accept this bid, reject others
@@ -162,37 +167,40 @@ export async function awardJob(params: {
       })
       .returning();
 
-    // Create escrow record
-    const [escrow] = await tx
-      .insert(escrows)
-      .values({
+    // Link escrow to assignment and set recipient
+    await tx
+      .update(escrows)
+      .set({
         assignmentId: assignment.id,
-        funderAgentId: params.requesterAgentId,
         recipientAgentId: bid.bidderAgentId,
-        amount,
-        escrowType: "on_chain",
+        amount, // Update to bid amount (may be less than budget)
       })
-      .returning();
+      .where(eq(escrows.id, escrow.id));
 
-    // Update job status with state machine validation
-    const existingAssignments = await tx
-      .select()
-      .from(assignments)
-      .where(eq(assignments.jobId, params.jobId));
+    // If bid amount < budget, refund the difference to creator
+    if (parsedAmount < parsedBudget) {
+      const refundAmount = (parsedBudget - parsedAmount).toFixed(6);
+      const [creator] = await tx
+        .select({ walletAddress: agents.walletAddress })
+        .from(agents)
+        .where(eq(agents.id, params.requesterAgentId));
+      if (creator?.walletAddress) {
+        await transferUSDC(creator.walletAddress, refundAmount);
+      }
+    }
 
-    const newStatus =
-      existingAssignments.length >= job.maxSlots ? "in_progress" : "filling";
-    validateJobTransition(job.status, newStatus, params.jobId);
+    // Update job status — always move to in_progress (1 agent per job)
+    validateJobTransition(job.status, "in_progress", params.jobId);
 
     await tx
       .update(jobs)
-      .set({ status: newStatus, updatedAt: new Date() })
+      .set({ status: "in_progress", updatedAt: new Date() })
       .where(eq(jobs.id, params.jobId));
 
-    return { assignment, escrow, jobTitle: job.title, workerAgentId: bid.bidderAgentId, amount };
+    return { assignment, escrowId: escrow.id, jobTitle: job.title, workerAgentId: bid.bidderAgentId, amount };
   });
 
-  // Create on-chain escrow from agent's own wallet
+  // Create on-chain escrow via platform wallet (USDC is already there)
   if (ESCROW_CONTRACT_ADDRESS) {
     const [funder] = await db
       .select({ walletAddress: agents.walletAddress })
@@ -201,13 +209,13 @@ export async function awardJob(params: {
     const [recipient] = await db
       .select({ walletAddress: agents.walletAddress })
       .from(agents)
-      .where(eq(agents.id, result.escrow.recipientAgentId!));
+      .where(eq(agents.id, result.workerAgentId));
 
     if (funder?.walletAddress && recipient?.walletAddress) {
       try {
-        const escrowResult = agentCreateEscrow({
-          walletAddress: funder.walletAddress,
-          escrowId: result.escrow.id,
+        const txHash = await onChainCreateEscrow({
+          escrowId: result.escrowId,
+          buyerAddress: funder.walletAddress,
           sellerAddress: recipient.walletAddress,
           token: "USDC",
           amount: result.amount,
@@ -215,10 +223,11 @@ export async function awardJob(params: {
           disputeWindowHours: DEFAULT_DISPUTE_WINDOW_HOURS,
         });
 
-        (result as any).unsignedTx = escrowResult.unsignedTx;
+        await db
+          .update(escrows)
+          .set({ onChainTxHash: txHash })
+          .where(eq(escrows.id, result.escrowId));
       } catch {
-        // Rollback: delete escrow record (no off-chain balance to restore)
-        await db.delete(escrows).where(eq(escrows.id, result.escrow.id));
         throw new Error("Failed to create on-chain escrow");
       }
     }
@@ -232,7 +241,12 @@ export async function awardJob(params: {
     amount: result.amount,
   });
 
-  return { assignment: result.assignment, escrow: result.escrow, unsignedTx: (result as any).unsignedTx };
+  const [updatedEscrow] = await db
+    .select()
+    .from(escrows)
+    .where(eq(escrows.id, result.escrowId));
+
+  return { assignment: result.assignment, escrow: updatedEscrow };
 }
 
 export async function submitWork(params: {

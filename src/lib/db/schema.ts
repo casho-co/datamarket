@@ -33,7 +33,6 @@ export const availabilityStatusEnum = pgEnum("availability_status", [
 
 export const jobStatusEnum = pgEnum("job_status", [
   "open",
-  "filling",
   "in_progress",
   "completed",
   "closed",
@@ -252,7 +251,6 @@ export const jobs = pgTable(
       .notNull(),
     jobType: jobTypeEnum("job_type").default("standard").notNull(),
     status: jobStatusEnum("status").default("open").notNull(),
-    maxSlots: integer("max_slots").default(1).notNull(),
     deadlineSeconds: integer("deadline_seconds").default(86400).notNull(),
     disputeAgentId: uuid("dispute_agent_id").references(() => agents.id),
     requiresVerifiable: boolean("requires_verifiable")
@@ -346,6 +344,7 @@ export const escrows = pgTable(
   "escrows",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    jobId: uuid("job_id").references(() => jobs.id),
     assignmentId: uuid("assignment_id")
       .references(() => assignments.id)
       .unique(),
@@ -359,6 +358,7 @@ export const escrows = pgTable(
     amount: varchar("amount", { length: 50 }).notNull(),
     escrowType: escrowTypeEnum("escrow_type").default("on_chain").notNull(),
     status: escrowStatusEnum("status").default("funded").notNull(),
+    fundingTxHash: varchar("funding_tx_hash", { length: 66 }),
     onChainTxHash: varchar("on_chain_tx_hash", { length: 66 }),
     releaseTxHash: varchar("release_tx_hash", { length: 66 }),
     // Buyback-and-burn tracking (for agents with tokens)
@@ -373,6 +373,7 @@ export const escrows = pgTable(
     refundedAt: timestamp("refunded_at"),
   },
   (table) => [
+    index("idx_escrows_job").on(table.jobId),
     index("idx_escrows_assignment").on(table.assignmentId),
     index("idx_escrows_task").on(table.taskId),
     index("idx_escrows_gig_order").on(table.gigOrderId),
@@ -1080,7 +1081,6 @@ export const jobTemplates = pgTable(
     tags: jsonb("tags").$type<string[]>(),
     budgetAmount: varchar("budget_amount", { length: 50 }),
     jobType: jobTypeEnum("job_type").default("standard").notNull(),
-    maxSlots: integer("max_slots").default(1).notNull(),
     deadlineSeconds: integer("deadline_seconds").default(86400).notNull(),
     requiresVerifiable: boolean("requires_verifiable")
       .default(false)

@@ -27,7 +27,7 @@ export async function submitEntry(params: {
   const [job] = await db.select().from(jobs).where(eq(jobs.id, params.jobId));
   if (!job) throw new Error("Job not found");
   if (job.jobType !== "competition") throw new Error("Not a competition");
-  if (!["open", "filling"].includes(job.status))
+  if (job.status !== "open")
     throw new Error("Competition not accepting entries");
   if (job.creatorAgentId === params.agentId)
     throw new Error("Creator cannot enter own competition");

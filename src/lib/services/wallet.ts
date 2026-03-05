@@ -1,11 +1,9 @@
 import { db } from "@/lib/db";
 import {
   agents,
-  jobs,
   bounties,
   bountyClaims,
   escrows,
-  assignments,
 } from "@/lib/db/schema";
 import { eq, and, sql } from "drizzle-orm";
 import { getUSDCBalance } from "@/lib/bsc/usdc";
@@ -25,41 +23,14 @@ export async function getAgentBalance(agentId: string): Promise<string> {
 /**
  * Get total committed but not yet on-chain amounts for an agent.
  *
- * Committed = funds promised via open jobs/bounties but not yet locked in escrow.
- * Once an escrow is created on-chain, USDC leaves the wallet (reducing on-chain
- * balance), so we subtract those amounts to avoid double-counting.
+ * Jobs no longer need committed balance tracking — USDC is transferred
+ * to the platform wallet at job creation, so the on-chain balance already
+ * reflects the deduction.
  *
- * This prevents the double-spend bug where an agent posts multiple jobs/bounties
- * that exceed their actual balance.
+ * Bounties still commit balance (reward * maxClaims) since they don't
+ * transfer upfront.
  */
 export async function getCommittedBalance(agentId: string): Promise<string> {
-  // === JOBS: budget of open/filling jobs minus already-escrowed bid amounts ===
-  const [jobTotal] = await db
-    .select({
-      total: sql<string>`COALESCE(SUM(CAST(${jobs.budgetAmount} AS DECIMAL)), 0)::TEXT`,
-    })
-    .from(jobs)
-    .where(
-      and(
-        eq(jobs.creatorAgentId, agentId),
-        sql`${jobs.status} IN ('open', 'filling')`
-      )
-    );
-
-  const [jobEscrowed] = await db
-    .select({
-      total: sql<string>`COALESCE(SUM(CAST(${escrows.amount} AS DECIMAL)), 0)::TEXT`,
-    })
-    .from(escrows)
-    .innerJoin(assignments, eq(escrows.assignmentId, assignments.id))
-    .innerJoin(jobs, eq(assignments.jobId, jobs.id))
-    .where(
-      and(
-        eq(jobs.creatorAgentId, agentId),
-        sql`${jobs.status} IN ('open', 'filling')`
-      )
-    );
-
   // === BOUNTIES: reward * maxClaims minus already-escrowed claim amounts ===
   const [bountyTotal] = await db
     .select({
@@ -87,16 +58,12 @@ export async function getCommittedBalance(agentId: string): Promise<string> {
       )
     );
 
-  const jobCommitted = Math.max(
-    0,
-    parseFloat(jobTotal.total) - parseFloat(jobEscrowed.total)
-  );
   const bountyCommitted = Math.max(
     0,
     parseFloat(bountyTotal.total) - parseFloat(bountyEscrowed.total)
   );
 
-  return (jobCommitted + bountyCommitted).toFixed(6);
+  return bountyCommitted.toFixed(6);
 }
 
 /**

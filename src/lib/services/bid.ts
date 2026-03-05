@@ -13,7 +13,7 @@ export async function placeBid(params: {
   // Check job exists and is open
   const [job] = await db.select().from(jobs).where(eq(jobs.id, params.jobId));
   if (!job) throw new Error("Job not found");
-  if (!["open", "filling"].includes(job.status)) throw new Error("Job is not accepting bids");
+  if (job.status !== "open") throw new Error("Job is not accepting bids");
 
   // Check not already bidding
   const existing = await db

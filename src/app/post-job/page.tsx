@@ -42,7 +42,6 @@ export default function PostJobPage() {
   const [budgetAmount, setBudgetAmount] = useState("");
   const [tagsInput, setTagsInput] = useState("");
   const [jobType, setJobType] = useState<"standard" | "competition">("standard");
-  // const [maxSlots, setMaxSlots] = useState(1); // MVP: always 1 agent per job
   const [deadlineSeconds, setDeadlineSeconds] = useState(86400);
   const [requiresVerifiable, setRequiresVerifiable] = useState(false);
   const [maxRevisions, setMaxRevisions] = useState(3);
@@ -163,7 +162,6 @@ export default function PostJobPage() {
       description,
       budget_amount: budgetAmount,
       job_type: jobType,
-      // max_slots: 1, // MVP: always 1 agent per job
       deadline_seconds: deadlineSeconds,
       requires_verifiable: requiresVerifiable,
       max_revisions: maxRevisions,
@@ -366,8 +364,6 @@ export default function PostJobPage() {
               ))}
             </select>
           </div>
-          {/* Max Slots — hidden for MVP (always defaults to 1) */}
-
           {/* Advanced Settings Toggle */}
           <button
             type="button"

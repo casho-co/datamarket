@@ -86,10 +86,12 @@ export async function POST(req: NextRequest) {
         tags: j.tags,
         budgetAmount: j.budget_amount,
         jobType: j.job_type,
-        // maxSlots: j.max_slots, // MVP: always 1
         deadlineSeconds: j.deadline_seconds,
         disputeAgentId: j.dispute_agent_id,
         requiresVerifiable: j.requires_verifiable,
+        paymentTxHash: j.payment_tx_hash,
+        maxRevisions: j.max_revisions,
+        autoReleaseDays: j.auto_release_days,
       });
 
       deliverWebhook(auth.agentId, "job.created", {

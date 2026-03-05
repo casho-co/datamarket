@@ -1,9 +1,10 @@
 import { db, withTransaction, type TX } from "@/lib/db";
-import { jobs, assignments, escrows } from "@/lib/db/schema";
-import { eq, and, lte, inArray } from "drizzle-orm";
+import { jobs, assignments, escrows, agents } from "@/lib/db/schema";
+import { eq, and, lte } from "drizzle-orm";
 import { emitFeedEvent } from "@/lib/services/feed";
 import { validateJobTransition, validateEscrowTransition } from "@/lib/services/state-machine";
 import { oracleRefund } from "@/lib/bsc/escrow-contract";
+import { transferUSDC } from "@/lib/bsc/usdc";
 
 export async function runJobExpiry() {
   const now = new Date();
@@ -12,7 +13,7 @@ export async function runJobExpiry() {
     .select()
     .from(jobs)
     .where(
-      and(inArray(jobs.status, ["open", "filling"]), lte(jobs.expiresAt, now))
+      and(eq(jobs.status, "open"), lte(jobs.expiresAt, now))
     );
 
   let processed = 0;
@@ -20,27 +21,39 @@ export async function runJobExpiry() {
   for (const job of expiredJobs) {
     try {
       await withTransaction(async (tx: TX) => {
-        // Refund any funded escrows
-        const jobEscrows = await tx
-          .select({
-            id: escrows.id,
-            status: escrows.status,
-            onChainTxHash: escrows.onChainTxHash,
-          })
+        // Refund the job escrow (funds at platform wallet)
+        const [jobEscrow] = await tx
+          .select()
           .from(escrows)
-          .innerJoin(assignments, eq(escrows.assignmentId, assignments.id))
           .where(
-            and(eq(assignments.jobId, job.id), eq(escrows.status, "funded"))
+            and(eq(escrows.jobId, job.id), eq(escrows.status, "funded"))
           );
 
-        for (const esc of jobEscrows) {
-          if (!esc.onChainTxHash) continue; // Skip escrows not yet funded on-chain
-          validateEscrowTransition(esc.status, "refunded", esc.id);
-          const refundTxHash = await oracleRefund(esc.id);
-          await tx
-            .update(escrows)
-            .set({ status: "refunded", refundedAt: now, releaseTxHash: refundTxHash })
-            .where(eq(escrows.id, esc.id));
+        if (jobEscrow) {
+          validateEscrowTransition(jobEscrow.status, "refunded", jobEscrow.id);
+
+          if (jobEscrow.onChainTxHash) {
+            // On-chain escrow exists — refund via contract
+            const refundTxHash = await oracleRefund(jobEscrow.id);
+            await tx
+              .update(escrows)
+              .set({ status: "refunded", refundedAt: now, releaseTxHash: refundTxHash })
+              .where(eq(escrows.id, jobEscrow.id));
+          } else {
+            // Pre-award: USDC at platform wallet — transfer back to creator
+            const [creator] = await tx
+              .select({ walletAddress: agents.walletAddress })
+              .from(agents)
+              .where(eq(agents.id, job.creatorAgentId));
+
+            if (creator?.walletAddress) {
+              await transferUSDC(creator.walletAddress, jobEscrow.amount);
+            }
+            await tx
+              .update(escrows)
+              .set({ status: "refunded", refundedAt: now })
+              .where(eq(escrows.id, jobEscrow.id));
+          }
         }
 
         // Cancel active assignments
@@ -53,9 +66,6 @@ export async function runJobExpiry() {
               eq(assignments.status, "in_progress")
             )
           );
-
-        // No off-chain balance to refund — funds are in agent's own wallet.
-        // On-chain escrow refunds are handled above.
 
         // Mark job expired
         validateJobTransition(job.status, "expired", job.id);
