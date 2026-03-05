@@ -53,9 +53,9 @@ export default function MyJobsPage() {
 
   if (isLoading) {
     return (
-      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-        <div className="bg-surface border border-border rounded-xl p-8 text-center">
-          <p className="text-muted text-sm">Loading...</p>
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+        <div className="bg-surface border border-border rounded-lg p-5 text-center">
+          <p className="text-muted text-[13px]">Loading...</p>
         </div>
       </div>
     );
@@ -64,11 +64,11 @@ export default function MyJobsPage() {
   if (!isAuthenticated) {
     return (
       <div className="max-w-md mx-auto px-4 py-24">
-        <div className="bg-surface border border-border rounded-xl p-8 text-center">
-          <div className="w-14 h-14 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center mx-auto mb-6">
+        <div className="bg-surface border border-border rounded-lg p-5 text-center">
+          <div className="w-12 h-12 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center mx-auto mb-5">
             <svg
-              width="24"
-              height="24"
+              width="20"
+              height="20"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -79,13 +79,13 @@ export default function MyJobsPage() {
               <path d="M3 9h18M9 21V9" />
             </svg>
           </div>
-          <h1 className="text-2xl font-bold mb-2">My Jobs</h1>
-          <p className="text-sm text-muted mb-6">
+          <h1 className="text-xl font-bold mb-1.5">My Jobs</h1>
+          <p className="text-[13px] text-muted mb-5">
             Login to view and manage your posted jobs
           </p>
           <button
             onClick={login}
-            className="w-full bg-accent text-background py-3 rounded-xl font-semibold hover:bg-accent-dim transition-colors"
+            className="w-full bg-accent text-background py-2.5 rounded-lg font-semibold text-sm hover:bg-accent-dim transition-colors"
           >
             Login to Continue
           </button>
@@ -95,31 +95,32 @@ export default function MyJobsPage() {
   }
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-3xl font-bold">My Jobs</h1>
-          <p className="text-sm text-muted mt-1">
+          <h1 className="text-2xl font-bold">My Jobs</h1>
+          <p className="text-[13px] text-muted mt-1">
             Manage your posted jobs and review bids
           </p>
         </div>
         <Link
           href="/post-job"
-          className="bg-accent text-background px-5 py-2.5 rounded-xl font-semibold hover:bg-accent-dim transition-colors text-sm"
+          className="bg-accent text-background px-4 py-2 rounded-lg font-semibold hover:bg-accent-dim transition-colors text-sm"
         >
           Post a Job
         </Link>
       </div>
 
       {error && (
-        <div className="flex items-center gap-2 text-danger text-sm bg-danger/10 border border-danger/20 rounded-xl px-4 py-3 mb-6">
+        <div className="flex items-center gap-2 text-danger text-[13px] bg-danger/10 border border-danger/20 rounded-lg px-3.5 py-2.5 mb-5">
           <svg
-            width="16"
-            height="16"
+            width="15"
+            height="15"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
+            className="shrink-0"
           >
             <circle cx="12" cy="12" r="10" />
             <line x1="12" y1="8" x2="12" y2="12" />
@@ -134,19 +135,19 @@ export default function MyJobsPage() {
           {[1, 2, 3].map((i) => (
             <div
               key={i}
-              className="bg-surface border border-border rounded-xl p-5 animate-pulse"
+              className="bg-surface border border-border rounded-lg p-4 animate-pulse"
             >
-              <div className="h-5 w-1/3 bg-surface-2 rounded mb-3" />
-              <div className="h-4 w-2/3 bg-surface-2 rounded" />
+              <div className="h-4 w-1/3 bg-surface-2 rounded mb-3" />
+              <div className="h-3.5 w-2/3 bg-surface-2 rounded" />
             </div>
           ))}
         </div>
       ) : jobs.length === 0 ? (
-        <div className="text-center py-20">
-          <div className="w-16 h-16 rounded-2xl bg-surface-2 border border-border flex items-center justify-center mx-auto mb-4">
+        <div className="text-center py-16">
+          <div className="w-14 h-14 rounded-lg bg-surface-2 border border-border flex items-center justify-center mx-auto mb-4">
             <svg
-              width="24"
-              height="24"
+              width="22"
+              height="22"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -157,46 +158,48 @@ export default function MyJobsPage() {
               <path d="M3 9h18M9 21V9" />
             </svg>
           </div>
-          <p className="text-muted font-medium">No jobs posted yet</p>
-          <p className="text-sm text-muted mt-1">
+          <p className="text-muted font-medium text-[13px]">
+            No jobs posted yet
+          </p>
+          <p className="text-[13px] text-muted mt-1">
             Create your first job to get started
           </p>
           <Link
             href="/post-job"
-            className="inline-block mt-4 bg-accent text-background px-6 py-2.5 rounded-xl font-semibold hover:bg-accent-dim transition-colors text-sm"
+            className="inline-block mt-4 bg-accent text-background px-5 py-2 rounded-lg font-semibold hover:bg-accent-dim transition-colors text-sm"
           >
             Post Your First Job
           </Link>
         </div>
       ) : (
-        <div className="grid gap-3">
+        <div className="grid gap-2.5">
           {jobs.map((job: any) => (
             <Link
               key={job.id}
               href={`/my-jobs/${job.id}`}
-              className="bg-surface border border-border rounded-xl p-5 hover:border-accent/30 transition-all block glow-card group"
+              className="bg-surface border border-border rounded-lg p-4 hover:border-accent/30 transition-all block group"
             >
               <div className="flex items-start justify-between gap-4">
                 <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2.5 mb-2">
-                    <h2 className="font-semibold truncate group-hover:text-accent transition-colors">
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <h2 className="font-semibold text-[13px] truncate group-hover:text-accent transition-colors">
                       {job.title}
                     </h2>
                     <span
-                      className={`text-xs px-2.5 py-0.5 rounded-lg border font-medium ${statusStyles[job.status] || "bg-surface-2 text-muted border-border"}`}
+                      className={`text-[11px] px-2 py-0.5 rounded-lg border font-medium shrink-0 ${statusStyles[job.status] || "bg-surface-2 text-muted border-border"}`}
                     >
                       {job.status.replace(/_/g, " ")}
                     </span>
                     {job.jobType === "competition" && (
-                      <span className="text-xs px-2.5 py-0.5 rounded-lg border bg-purple-500/10 text-purple-400 border-purple-500/20 font-medium">
+                      <span className="text-[11px] px-2 py-0.5 rounded-lg border bg-purple-500/10 text-purple-400 border-purple-500/20 font-medium shrink-0">
                         competition
                       </span>
                     )}
                   </div>
-                  <p className="text-sm text-muted truncate">
+                  <p className="text-[13px] text-muted truncate">
                     {job.description?.slice(0, 120)}
                   </p>
-                  <div className="flex items-center gap-3 mt-3 text-xs text-muted">
+                  <div className="flex items-center gap-3 mt-2.5 text-[11px] text-muted">
                     <span>{job.bidCount ?? 0} bids</span>
                     <span>
                       {new Date(job.createdAt).toLocaleDateString()}
@@ -206,7 +209,7 @@ export default function MyJobsPage() {
                         {job.tags.slice(0, 3).map((tag: string) => (
                           <span
                             key={tag}
-                            className="bg-surface-2 border border-border px-2 py-0.5 rounded-lg"
+                            className="bg-surface-2 border border-border px-1.5 py-0.5 rounded"
                           >
                             {tag}
                           </span>
@@ -217,10 +220,10 @@ export default function MyJobsPage() {
                 </div>
                 {job.budgetAmount && (
                   <div className="text-right shrink-0">
-                    <p className="font-mono font-bold text-accent text-lg">
+                    <p className="font-mono font-bold text-accent text-base">
                       {parseFloat(job.budgetAmount).toFixed(2)}
                     </p>
-                    <p className="text-xs text-muted">USDC</p>
+                    <p className="text-[11px] text-muted">USDC</p>
                   </div>
                 )}
               </div>

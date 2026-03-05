@@ -21,7 +21,7 @@ export async function PATCH(req: NextRequest) {
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   let raw: unknown;
@@ -62,5 +62,5 @@ export async function PATCH(req: NextRequest) {
     ipAddress: getClientIp(req),
   });
 
-  return withRateLimitHeaders(NextResponse.json(agent));
+  return withRateLimitHeaders(NextResponse.json(agent), rlHeaders);
 }

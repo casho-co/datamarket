@@ -34,7 +34,7 @@ export async function POST(
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   const { jobId } = await params;
@@ -90,7 +90,7 @@ export async function POST(
         next_actions: getNextActions("bid_placed"),
       },
       { status: 201 }
-    ));
+    ), rlHeaders);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: safeErrorMessage(err) },

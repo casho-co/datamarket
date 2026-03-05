@@ -36,44 +36,27 @@ export type ChallengeAction = "register" | "login";
 export async function createChallenge(
   walletAddress: string,
   action: ChallengeAction = "register"
-): Promise<{
-  nonce: string;
-  expires_at: string;
-  typed_data: {
-    domain: typeof EIP712_DOMAIN;
-    types: typeof CHALLENGE_TYPES;
-    primaryType: "Challenge";
-    message: {
-      walletAddress: string;
-      nonce: string;
-      expiresAt: bigint;
-      action: string;
-    };
-  };
-}> {
+) {
   const redis = getRedis();
   const nonce = uuid();
-  const expiresAtUnix = BigInt(Math.floor(Date.now() / 1000) + CHALLENGE_TTL);
+  const expiresAtUnix = Math.floor(Date.now() / 1000) + CHALLENGE_TTL;
   const key = `${CHALLENGE_PREFIX}${walletAddress.toLowerCase()}:${nonce}`;
 
-  // Store action with nonce so we can verify it matches on verify
-  await redis.set(key, action, { ex: CHALLENGE_TTL });
-
-  const expiresAt = new Date(
-    Date.now() + CHALLENGE_TTL * 1000
-  ).toISOString();
+  // Store action + original expiresAt — avoids reconstructing from TTL in verifyChallenge
+  await redis.set(key, JSON.stringify({ action, expiresAt: String(expiresAtUnix) }), { ex: CHALLENGE_TTL });
 
   return {
     nonce,
-    expires_at: expiresAt,
+    expires_at: new Date(expiresAtUnix * 1000).toISOString(),
     typed_data: {
       domain: EIP712_DOMAIN,
       types: CHALLENGE_TYPES,
       primaryType: "Challenge",
       message: {
-        walletAddress: walletAddress.toLowerCase() as Hex,
+        walletAddress: walletAddress.toLowerCase(),
         nonce,
-        expiresAt: expiresAtUnix,
+        // Sent as string to avoid JSON.stringify BigInt crash — frontend converts to BigInt for signing
+        expiresAt: String(expiresAtUnix),
         action,
       },
     },
@@ -96,10 +79,21 @@ export async function verifyChallenge(
   const redis = getRedis();
   const key = `${CHALLENGE_PREFIX}${walletAddress.toLowerCase()}:${nonce}`;
 
-  // Check nonce exists and get stored action
-  const storedAction = await redis.get<string>(key);
-  if (!storedAction) {
+  // Single Redis read — contains both action and original expiresAt
+  const stored = await redis.get<string>(key);
+  if (!stored) {
     return { valid: false, error: "Challenge expired or not found" };
+  }
+
+  let storedAction: string;
+  let expiresAtUnix: bigint;
+  try {
+    const parsed = JSON.parse(stored) as { action: string; expiresAt: string };
+    storedAction = parsed.action;
+    expiresAtUnix = BigInt(parsed.expiresAt);
+  } catch {
+    // Legacy key stored as plain string (action only) — shouldn't exist after this deploy
+    return { valid: false, error: "Challenge format invalid, please request a new challenge" };
   }
 
   // Verify action matches if specified
@@ -109,12 +103,6 @@ export async function verifyChallenge(
       error: `Challenge action mismatch. Expected: ${expectedAction}, got: ${storedAction}`,
     };
   }
-
-  // Reconstruct the EIP-712 message and verify signature
-  // We need the exact expiresAt from when the challenge was created.
-  // Since Redis TTL gives us remaining time, we compute the original expiry.
-  const ttl = await redis.ttl(key);
-  const expiresAtUnix = BigInt(Math.floor(Date.now() / 1000) + ttl);
 
   try {
     const valid = await verifyTypedData({

@@ -23,12 +23,12 @@ function StarRating({ count }: { count: string | number }) {
   return (
     <span className="flex items-center gap-0.5">
       {Array.from({ length: full }).map((_, i) => (
-        <svg key={`f${i}`} width="14" height="14" viewBox="0 0 24 24" fill="currentColor" className="text-amber-400">
+        <svg key={`f${i}`} width="12" height="12" viewBox="0 0 24 24" fill="currentColor" className="text-amber-400">
           <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
         </svg>
       ))}
       {half && (
-        <svg width="14" height="14" viewBox="0 0 24 24" className="text-amber-400">
+        <svg width="12" height="12" viewBox="0 0 24 24" className="text-amber-400">
           <defs>
             <linearGradient id="halfStar">
               <stop offset="50%" stopColor="currentColor" />
@@ -39,7 +39,7 @@ function StarRating({ count }: { count: string | number }) {
         </svg>
       )}
       {Array.from({ length: empty }).map((_, i) => (
-        <svg key={`e${i}`} width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-border">
+        <svg key={`e${i}`} width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-border">
           <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
         </svg>
       ))}
@@ -53,6 +53,11 @@ const sortOptions = [
   { value: "newest", label: "Newest" },
 ];
 
+const actorStyles: Record<string, string> = {
+  ai: "bg-blue-500/10 text-blue-400 border-blue-500/20",
+  human: "bg-green-500/10 text-green-400 border-green-500/20",
+};
+
 export default async function AgentsPage({
   searchParams,
 }: {
@@ -62,21 +67,23 @@ export default async function AgentsPage({
   const agents = await getAgents(sp);
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-8">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-6">
         <div>
-          <h1 className="text-3xl font-bold">Agents</h1>
-          <p className="text-sm text-muted mt-1">Discover AI agents and human workers</p>
+          <p className="text-xs font-semibold text-accent uppercase tracking-widest mb-1">Directory</p>
+          <h1 className="text-2xl font-bold text-foreground">Agents</h1>
+          <p className="text-[13px] text-muted mt-0.5">Discover AI agents and human workers</p>
         </div>
-        <div className="flex items-center gap-1 bg-surface border border-border rounded-xl p-1">
+        <div className="flex items-center gap-px bg-border rounded-lg p-px">
           {sortOptions.map((opt) => (
             <Link
               key={opt.value}
               href={`/agents?sort=${opt.value}`}
-              className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+              className={`text-[11px] px-3 py-1.5 rounded-lg font-medium transition-colors ${
                 sp.sort === opt.value
                   ? "bg-accent text-background"
-                  : "text-muted hover:text-foreground"
+                  : "bg-surface text-muted hover:text-foreground"
               }`}
             >
               {opt.label}
@@ -85,18 +92,19 @@ export default async function AgentsPage({
         </div>
       </div>
 
-      <div className="grid gap-3">
+      {/* Agent List */}
+      <div className="grid gap-px bg-border rounded-lg overflow-hidden">
         {agents.length === 0 && (
-          <div className="text-center py-20">
-            <div className="w-16 h-16 rounded-2xl bg-surface-2 border border-border flex items-center justify-center mx-auto mb-4">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted">
+          <div className="bg-surface text-center py-16">
+            <div className="w-12 h-12 rounded-lg bg-surface-2 border border-border flex items-center justify-center mx-auto mb-3">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted">
                 <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" strokeLinecap="round" />
                 <circle cx="9" cy="7" r="4" />
                 <path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" strokeLinecap="round" />
               </svg>
             </div>
-            <p className="text-muted font-medium">No agents found</p>
-            <p className="text-sm text-muted mt-1">Be the first to register</p>
+            <p className="text-[13px] text-muted font-medium">No agents found</p>
+            <p className="text-[11px] text-muted mt-1">Be the first to register</p>
           </div>
         )}
         {agents.map((agent: any) => {
@@ -106,29 +114,29 @@ export default async function AgentsPage({
             <Link
               key={agent.id}
               href={`/agents/${agent.id}`}
-              className="bg-surface border border-border rounded-xl p-5 hover:border-accent/30 transition-all block glow-card group"
+              className="bg-surface border-l-2 border-l-accent/40 p-4 hover:border-l-accent hover:bg-surface-2/50 transition-all block group"
             >
               <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  <div className="w-11 h-11 rounded-xl bg-accent/10 border border-accent/20 flex items-center justify-center shrink-0">
-                    <span className="text-accent font-bold">{initial}</span>
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-lg bg-accent/10 border border-accent/20 flex items-center justify-center shrink-0">
+                    <span className="text-accent font-bold text-[13px]">{initial}</span>
                   </div>
                   <div>
-                    <div className="flex items-center gap-2 mb-1">
-                      <h2 className="font-semibold group-hover:text-accent transition-colors">
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <h2 className="text-[13px] font-semibold group-hover:text-accent transition-colors">
                         {handle}
                       </h2>
-                      <span className="text-xs px-2 py-0.5 rounded-lg bg-surface-2 text-muted border border-border">
+                      <span className={`text-[11px] px-1.5 py-px rounded border font-medium uppercase tracking-wide ${actorStyles[agent.actorType] || "bg-surface-2 text-muted border-border"}`}>
                         {agent.actorType}
                       </span>
                     </div>
-                    <p className="text-sm text-muted truncate max-w-md">
+                    <p className="text-[13px] text-muted truncate max-w-md">
                       {agent.description || "No description"}
                     </p>
                     {agent.tags?.length > 0 && (
-                      <div className="flex gap-1 mt-2">
+                      <div className="flex gap-1 mt-1.5">
                         {agent.tags.slice(0, 5).map((tag: string) => (
-                          <span key={tag} className="text-xs bg-surface-2 border border-border px-2 py-0.5 rounded-lg">
+                          <span key={tag} className="text-[11px] bg-surface-2 text-muted-light px-1.5 py-px rounded">
                             {tag}
                           </span>
                         ))}
@@ -136,13 +144,13 @@ export default async function AgentsPage({
                     )}
                   </div>
                 </div>
-                <div className="text-right shrink-0 ml-4">
+                <div className="text-right shrink-0 ml-4 flex flex-col items-end gap-1">
                   <StarRating count={agent.reputation?.stars || "0"} />
-                  <p className="text-sm font-mono text-accent mt-1">
-                    {parseFloat(agent.reputation?.totalEarned || "0").toFixed(2)} USDC
+                  <p className="text-[13px] font-mono text-accent font-semibold">
+                    {parseFloat(agent.reputation?.totalEarned || "0").toFixed(2)} <span className="text-[11px] text-muted font-normal">USDC</span>
                   </p>
-                  <p className="text-xs text-muted">
-                    {agent.reputation?.completedJobs || 0} jobs
+                  <p className="text-[11px] text-muted">
+                    {agent.reputation?.completedJobs || 0} jobs completed
                   </p>
                 </div>
               </div>

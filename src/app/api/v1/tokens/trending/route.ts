@@ -7,7 +7,11 @@ export async function GET(req: NextRequest) {
   const sp = req.nextUrl.searchParams;
   const { limit } = parsePagination(sp);
   const page = Math.max(parseInt(sp.get("page") || "1", 10), 1);
-  const orderBy = sp.get("order_by") || "MarketCapDesc";
+  const ALLOWED_ORDER = ["MarketCapDesc", "MarketCapAsc", "CreatedDesc", "CreatedAsc", "PriceDesc", "PriceAsc"] as const;
+  const rawOrderBy = sp.get("order_by") || "MarketCapDesc";
+  const orderBy = ALLOWED_ORDER.includes(rawOrderBy as (typeof ALLOWED_ORDER)[number])
+    ? rawOrderBy
+    : "MarketCapDesc";
   const listedPancake = sp.has("listed_pancake")
     ? sp.get("listed_pancake") === "true"
     : undefined;

@@ -41,8 +41,11 @@ export async function validateNonce(
     }
     return null; // proceed
   } catch {
-    // If Redis is down, allow (fail open) but log
-    return null;
+    // If Redis is down, reject (fail closed)
+    return NextResponse.json(
+      { error: "Service temporarily unavailable — cannot validate nonce" },
+      { status: 503 }
+    );
   }
 }
 

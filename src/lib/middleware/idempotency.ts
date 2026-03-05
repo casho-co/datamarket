@@ -44,7 +44,8 @@ export async function checkIdempotency(
 
     return { status: "new" };
   } catch {
-    return { status: "new" }; // Fail open
+    // Fail closed — reject if Redis is down
+    return { status: "concurrent" };
   }
 }
 

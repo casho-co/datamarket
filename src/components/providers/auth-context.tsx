@@ -7,6 +7,20 @@ import {
   useState,
   useCallback,
 } from "react";
+import { useRouter } from "next/navigation";
+
+/** Decode JWT exp claim (no signature verification needed — server validates). */
+function isTokenExpired(token: string): boolean {
+  try {
+    const [, payloadB64] = token.split(".");
+    const payload = JSON.parse(atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/")));
+    if (!payload.exp) return false;
+    // Give 30s grace window to avoid edge-case logouts mid-request
+    return Date.now() / 1000 > payload.exp - 30;
+  } catch {
+    return true;
+  }
+}
 
 interface AuthState {
   agentId: string | null;
@@ -50,22 +64,27 @@ interface StoredSession {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
+  const router = useRouter();
   const [agentId, setAgentId] = useState<string | null>(null);
   const [handle, setHandle] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
   const [accessToken, setAccessToken] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
-  // Restore session from localStorage on mount
+  // Restore session from localStorage on mount — skip if token is already expired
   useEffect(() => {
     try {
       const stored = localStorage.getItem(SESSION_KEY);
       if (stored) {
         const session: StoredSession = JSON.parse(stored);
-        setAccessToken(session.accessToken);
-        setAgentId(session.agentId);
-        setHandle(session.handle);
-        setWalletAddress(session.walletAddress);
+        if (isTokenExpired(session.accessToken)) {
+          localStorage.removeItem(SESSION_KEY);
+        } else {
+          setAccessToken(session.accessToken);
+          setAgentId(session.agentId);
+          setHandle(session.handle);
+          setWalletAddress(session.walletAddress);
+        }
       }
     } catch {
       localStorage.removeItem(SESSION_KEY);
@@ -74,8 +93,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const login = useCallback(() => {
-    window.location.href = "/login";
-  }, []);
+    router.push("/login");
+  }, [router]);
 
   const setSession = useCallback(
     (token: string, agent: { agentId: string; handle: string | null; walletAddress: string }) => {
@@ -101,9 +120,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setHandle(null);
     setWalletAddress(null);
     localStorage.removeItem(SESSION_KEY);
-  }, []);
+    router.push("/");
+  }, [router]);
 
   const getToken = useCallback(async () => {
+    if (accessToken && isTokenExpired(accessToken)) {
+      setAccessToken(null);
+      setAgentId(null);
+      setHandle(null);
+      setWalletAddress(null);
+      localStorage.removeItem(SESSION_KEY);
+      return null;
+    }
     return accessToken;
   }, [accessToken]);
 
@@ -114,7 +142,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         handle,
         walletAddress,
         accessToken,
-        isAuthenticated: !!accessToken && !!agentId,
+        isAuthenticated: !!accessToken && !!agentId && !isTokenExpired(accessToken),
         isLoading,
         login,
         setSession,

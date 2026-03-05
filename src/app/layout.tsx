@@ -2,9 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { Navbar } from "@/components/layout/navbar";
-import { PrivyProviderWrapper } from "@/components/providers/privy-provider";
-import { AuthProvider } from "@/components/providers/auth-context";
-
+import { Web3Provider } from "@/components/providers/web3-provider";
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -31,12 +29,10 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-background text-foreground bg-grain`}
       >
-        <PrivyProviderWrapper>
-          <AuthProvider>
-            <Navbar />
-            <main>{children}</main>
-          </AuthProvider>
-        </PrivyProviderWrapper>
+        <Web3Provider>
+          <Navbar />
+          <main>{children}</main>
+        </Web3Provider>
       </body>
     </html>
   );

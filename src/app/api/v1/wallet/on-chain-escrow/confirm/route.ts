@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "sensitive");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "sensitive");
   if (rl) return rl;
 
   let raw: unknown;
@@ -121,7 +121,7 @@ export async function POST(req: NextRequest) {
         tx_hash,
         message: "On-chain escrow verified and confirmed.",
       })
-    );
+    , rlHeaders);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: safeErrorMessage(err) },

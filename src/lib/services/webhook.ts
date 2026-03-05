@@ -95,7 +95,11 @@ async function attemptDelivery(deliveryId: string): Promise<void> {
   if (!delivery || delivery.status === "delivered") return;
 
   const body = JSON.stringify(delivery.payload);
-  const secret = process.env.WEBHOOK_SECRET || "default-webhook-secret";
+  const secret = process.env.WEBHOOK_SECRET;
+  if (!secret) {
+    console.warn("[webhook] WEBHOOK_SECRET not set — skipping delivery", deliveryId);
+    return;
+  }
   const signature = createHmac("sha256", secret).update(body).digest("hex");
   const newAttempt = delivery.attempt + 1;
 

@@ -11,13 +11,13 @@ async function getJob(jobId: string) {
 }
 
 const statusStyles: Record<string, string> = {
-  open: "bg-green-500/10 text-green-400 border-green-500/20",
-  filling: "bg-blue-500/10 text-blue-400 border-blue-500/20",
-  in_progress: "bg-yellow-500/10 text-yellow-400 border-yellow-500/20",
-  completed: "bg-accent/10 text-accent border-accent/20",
-  closed: "bg-red-500/10 text-red-400 border-red-500/20",
-  expired: "bg-zinc-500/10 text-zinc-400 border-zinc-500/20",
-  judging: "bg-purple-500/10 text-purple-400 border-purple-500/20",
+  open: "bg-green-500/10 text-green-400",
+  filling: "bg-blue-500/10 text-blue-400",
+  in_progress: "bg-yellow-500/10 text-yellow-400",
+  completed: "bg-accent/10 text-accent",
+  closed: "bg-red-500/10 text-red-400",
+  expired: "bg-zinc-500/10 text-zinc-400",
+  judging: "bg-purple-500/10 text-purple-400",
 };
 
 const assignmentStyles: Record<string, string> = {
@@ -37,22 +37,22 @@ export default async function JobDetailPage({
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
-      <div className="flex items-center gap-2 text-sm text-muted mb-6">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-1.5 text-[13px] text-muted mb-5">
         <Link href="/jobs" className="hover:text-foreground transition-colors">
           Jobs
         </Link>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-border">
-          <path d="M9 18l6-6-6-6" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
-        <span className="text-foreground truncate max-w-[200px]">{job.title}</span>
+        <span className="text-border">/</span>
+        <span className="text-foreground truncate max-w-[240px]">{job.title}</span>
       </div>
 
-      <div className="bg-surface border border-border rounded-xl p-6 sm:p-8 mb-6">
-        <div className="flex items-start justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold mb-3">{job.title}</h1>
-            <div className="flex items-center gap-2.5 text-sm">
-              <span className={`px-2.5 py-0.5 rounded-lg border text-xs font-medium ${statusStyles[job.status] || "bg-surface-2 border-border text-muted"}`}>
+      {/* Main card */}
+      <div className="bg-surface border border-border rounded-lg p-5 sm:p-6 mb-5">
+        <div className="flex items-start justify-between gap-4 mb-5">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold mb-2">{job.title}</h1>
+            <div className="flex flex-wrap items-center gap-2 text-[13px]">
+              <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${statusStyles[job.status] || "bg-surface-2 text-muted"}`}>
                 {job.status.replace(/_/g, " ")}
               </span>
               <span className="text-muted">{job.jobType}</span>
@@ -61,26 +61,26 @@ export default async function JobDetailPage({
             </div>
           </div>
           {job.budgetAmount && (
-            <div className="text-right">
-              <p className="text-3xl font-mono font-bold text-accent">
+            <div className="text-right shrink-0">
+              <p className="text-2xl font-mono font-bold text-accent">
                 {parseFloat(job.budgetAmount).toFixed(2)}
               </p>
-              <p className="text-sm text-muted">USDC</p>
+              <p className="text-[11px] text-muted">USDC</p>
             </div>
           )}
         </div>
 
-        <div className="border-t border-border pt-6 mb-6">
-          <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">Description</h3>
-          <div className="text-sm whitespace-pre-wrap leading-relaxed">{job.description}</div>
+        <div className="border-t border-border pt-5 mb-5">
+          <p className="text-[11px] font-semibold text-muted uppercase tracking-wider mb-2">Description</p>
+          <div className="text-[13px] whitespace-pre-wrap leading-relaxed">{job.description}</div>
         </div>
 
         {job.tags?.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-6">
+          <div className="flex flex-wrap gap-1.5 mb-5">
             {job.tags.map((tag: string) => (
               <span
                 key={tag}
-                className="bg-surface-2 text-muted text-xs px-2.5 py-1 rounded-lg border border-border"
+                className="bg-surface-2 text-muted text-[11px] px-2 py-0.5 rounded border border-border"
               >
                 {tag}
               </span>
@@ -88,49 +88,46 @@ export default async function JobDetailPage({
           </div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-6 border-t border-border">
-          <div>
-            <p className="text-xs text-muted uppercase tracking-wider mb-1">Created by</p>
-            <Link
-              href={`/agents/${job.creatorAgentId}`}
-              className="text-accent hover:underline text-sm font-medium"
-            >
-              {job.creator?.handle || job.creatorAgentId?.slice(0, 8)}
-            </Link>
-          </div>
-          <div>
-            <p className="text-xs text-muted uppercase tracking-wider mb-1">Deadline</p>
-            <p className="text-sm font-mono">{Math.round(job.deadlineSeconds / 3600)}h</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted uppercase tracking-wider mb-1">Expires</p>
-            <p className="text-sm">{new Date(job.expiresAt).toLocaleString()}</p>
-          </div>
-          <div>
-            <p className="text-xs text-muted uppercase tracking-wider mb-1">Created</p>
-            <p className="text-sm">{new Date(job.createdAt).toLocaleString()}</p>
-          </div>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border rounded-lg overflow-hidden">
+          {[
+            { label: "Created by", value: job.creator?.handle || job.creatorAgentId?.slice(0, 8), link: `/agents/${job.creatorAgentId}` },
+            { label: "Deadline", value: `${Math.round(job.deadlineSeconds / 3600)}h` },
+            { label: "Expires", value: new Date(job.expiresAt).toLocaleDateString() },
+            { label: "Created", value: new Date(job.createdAt).toLocaleDateString() },
+          ].map((item) => (
+            <div key={item.label} className="bg-surface p-3">
+              <p className="text-[11px] text-muted uppercase tracking-wider mb-0.5">{item.label}</p>
+              {item.link ? (
+                <Link href={item.link} className="text-accent hover:underline text-[13px] font-medium">
+                  {item.value}
+                </Link>
+              ) : (
+                <p className="text-[13px] font-mono">{item.value}</p>
+              )}
+            </div>
+          ))}
         </div>
       </div>
 
+      {/* Assignments */}
       {job.assignments?.length > 0 && (
-        <div className="bg-surface border border-border rounded-xl p-6 sm:p-8">
-          <h2 className="font-semibold mb-4">Assignments</h2>
-          <div className="space-y-3">
+        <div className="bg-surface border border-border rounded-lg p-5 sm:p-6">
+          <h2 className="text-sm font-semibold mb-3">Assignments</h2>
+          <div className="space-y-2">
             {job.assignments.map((a: any) => (
-              <div key={a.id} className="bg-surface-2 border border-border rounded-xl p-4 text-sm">
-                <div className="flex items-center justify-between mb-2">
+              <div key={a.id} className="bg-surface-2/50 border border-border rounded-lg p-3 text-[13px]">
+                <div className="flex items-center justify-between mb-1.5">
                   <div className="flex items-center gap-2">
                     <span className="text-muted">Worker:</span>
                     <Link href={`/agents/${a.workerAgentId}`} className="text-accent hover:underline font-medium">
                       {a.workerAgentId.slice(0, 8)}
                     </Link>
                   </div>
-                  <span className={`px-2.5 py-0.5 rounded-lg text-xs font-medium ${assignmentStyles[a.status] || "bg-surface text-muted"}`}>
+                  <span className={`px-2 py-0.5 rounded text-[11px] font-medium ${assignmentStyles[a.status] || "bg-surface text-muted"}`}>
                     {a.status}
                   </span>
                 </div>
-                <div className="text-muted flex flex-wrap gap-4">
+                <div className="text-muted flex flex-wrap gap-3">
                   <span>
                     Escrow: <span className="font-mono text-accent">{a.escrowAmount} USDC</span>
                   </span>

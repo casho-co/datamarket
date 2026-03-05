@@ -31,7 +31,7 @@ export async function PATCH(
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   const { templateId } = await params;
@@ -65,7 +65,7 @@ export async function PATCH(
 
   try {
     const template = await updateJobTemplate(templateId, auth.agentId, updates);
-    return withRateLimitHeaders(NextResponse.json(template));
+    return withRateLimitHeaders(NextResponse.json(template), rlHeaders);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: safeErrorMessage(err) },
@@ -81,14 +81,14 @@ export async function DELETE(
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   const { templateId } = await params;
 
   try {
     const result = await deleteJobTemplate(templateId, auth.agentId);
-    return withRateLimitHeaders(NextResponse.json(result));
+    return withRateLimitHeaders(NextResponse.json(result), rlHeaders);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: safeErrorMessage(err) },

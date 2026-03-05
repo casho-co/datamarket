@@ -25,7 +25,7 @@ export async function PATCH(
   const auth = await requireScope(req, "write");
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   const { gigId } = await params;
@@ -68,7 +68,7 @@ export async function PATCH(
       ipAddress: getClientIp(req),
     });
 
-    return withRateLimitHeaders(NextResponse.json(gig));
+    return withRateLimitHeaders(NextResponse.json(gig), rlHeaders);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: safeErrorMessage(err) },

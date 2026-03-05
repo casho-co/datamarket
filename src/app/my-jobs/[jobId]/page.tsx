@@ -135,9 +135,9 @@ export default function ManageJobPage() {
 
   if (isLoading || loading) {
     return (
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
-        <div className="bg-surface border border-border rounded-xl p-8 text-center">
-          <p className="text-muted text-sm">Loading...</p>
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+        <div className="bg-surface border border-border rounded-lg p-5 text-center">
+          <p className="text-muted text-[13px]">Loading...</p>
         </div>
       </div>
     );
@@ -146,14 +146,14 @@ export default function ManageJobPage() {
   if (!isAuthenticated) {
     return (
       <div className="max-w-md mx-auto px-4 py-24">
-        <div className="bg-surface border border-border rounded-xl p-8 text-center">
-          <h1 className="text-2xl font-bold mb-2">Login Required</h1>
-          <p className="text-sm text-muted mb-6">
+        <div className="bg-surface border border-border rounded-lg p-5 text-center">
+          <h1 className="text-xl font-bold mb-1.5">Login Required</h1>
+          <p className="text-[13px] text-muted mb-5">
             Login to manage your jobs
           </p>
           <button
             onClick={login}
-            className="w-full bg-accent text-background py-3 rounded-xl font-semibold hover:bg-accent-dim transition-colors"
+            className="w-full bg-accent text-background py-2.5 rounded-lg font-semibold text-sm hover:bg-accent-dim transition-colors"
           >
             Login to Continue
           </button>
@@ -164,12 +164,12 @@ export default function ManageJobPage() {
 
   if (!job) {
     return (
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
-        <div className="text-center py-20">
-          <p className="text-muted font-medium">Job not found</p>
+      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+        <div className="text-center py-16">
+          <p className="text-muted font-medium text-[13px]">Job not found</p>
           <Link
             href="/my-jobs"
-            className="text-accent hover:underline text-sm mt-2 inline-block"
+            className="text-accent hover:underline text-[13px] mt-2 inline-block"
           >
             Back to My Jobs
           </Link>
@@ -179,13 +179,12 @@ export default function ManageJobPage() {
   }
 
   const canAcceptBids = job.status === "open" || job.status === "filling";
-  const canCancel =
-    job.status === "open" || job.status === "filling";
+  const canCancel = job.status === "open" || job.status === "filling";
 
   return (
-    <div className="max-w-4xl mx-auto px-4 sm:px-6 py-8">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
       {/* Breadcrumb */}
-      <div className="flex items-center gap-2 text-sm text-muted mb-6">
+      <div className="flex items-center gap-2 text-[13px] text-muted mb-5">
         <Link
           href="/my-jobs"
           className="hover:text-foreground transition-colors"
@@ -199,7 +198,7 @@ export default function ManageJobPage() {
           fill="none"
           stroke="currentColor"
           strokeWidth="2"
-          className="text-border"
+          className="text-border-light"
         >
           <path
             d="M9 18l6-6-6-6"
@@ -214,29 +213,35 @@ export default function ManageJobPage() {
 
       {/* Success/Error Messages */}
       {actionMessage && (
-        <div className="flex items-center gap-2 text-green-400 text-sm bg-green-500/10 border border-green-500/20 rounded-xl px-4 py-3 mb-6">
+        <div className="flex items-center gap-2 text-green-400 text-[13px] bg-green-500/10 border border-green-500/20 rounded-lg px-3.5 py-2.5 mb-5">
           <svg
-            width="16"
-            height="16"
+            width="15"
+            height="15"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
+            className="shrink-0"
           >
-            <path d="M20 6L9 17l-5-5" strokeLinecap="round" strokeLinejoin="round" />
+            <path
+              d="M20 6L9 17l-5-5"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
           </svg>
           {actionMessage}
         </div>
       )}
       {error && (
-        <div className="flex items-center gap-2 text-danger text-sm bg-danger/10 border border-danger/20 rounded-xl px-4 py-3 mb-6">
+        <div className="flex items-center gap-2 text-danger text-[13px] bg-danger/10 border border-danger/20 rounded-lg px-3.5 py-2.5 mb-5">
           <svg
-            width="16"
-            height="16"
+            width="15"
+            height="15"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
             strokeWidth="2"
+            className="shrink-0"
           >
             <circle cx="12" cy="12" r="10" />
             <line x1="12" y1="8" x2="12" y2="12" />
@@ -247,49 +252,51 @@ export default function ManageJobPage() {
       )}
 
       {/* Job Details Card */}
-      <div className="bg-surface border border-border rounded-xl p-6 sm:p-8 mb-6">
-        <div className="flex items-start justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-2xl sm:text-3xl font-bold mb-3">
+      <div className="bg-surface border border-border rounded-lg p-4 sm:p-5 mb-5">
+        <div className="flex items-start justify-between gap-4 mb-5">
+          <div className="min-w-0">
+            <h1 className="text-xl sm:text-2xl font-bold mb-2 truncate">
               {job.title}
             </h1>
-            <div className="flex items-center gap-2.5 text-sm">
+            <div className="flex items-center gap-2 flex-wrap">
               <span
-                className={`px-2.5 py-0.5 rounded-lg border text-xs font-medium ${statusStyles[job.status] || "bg-surface-2 border-border text-muted"}`}
+                className={`px-2 py-0.5 rounded-lg border text-[11px] font-medium ${statusStyles[job.status] || "bg-surface-2 border-border text-muted"}`}
               >
                 {job.status.replace(/_/g, " ")}
               </span>
-              <span className="text-muted">{job.jobType}</span>
-              <span className="text-muted">
+              <span className="text-[11px] text-muted font-medium uppercase tracking-wider">
+                {job.jobType}
+              </span>
+              <span className="text-[11px] text-muted">
                 Max {job.maxSlots} slot{job.maxSlots > 1 ? "s" : ""}
               </span>
             </div>
           </div>
           {job.budgetAmount && (
-            <div className="text-right">
-              <p className="text-3xl font-mono font-bold text-accent">
+            <div className="text-right shrink-0">
+              <p className="text-2xl font-mono font-bold text-accent">
                 {parseFloat(job.budgetAmount).toFixed(2)}
               </p>
-              <p className="text-sm text-muted">USDC</p>
+              <p className="text-[11px] text-muted">USDC</p>
             </div>
           )}
         </div>
 
-        <div className="border-t border-border pt-6 mb-6">
-          <h3 className="text-xs font-semibold text-muted uppercase tracking-wider mb-3">
+        <div className="border-t border-border pt-4 mb-4">
+          <h3 className="text-[11px] font-semibold text-muted uppercase tracking-wider mb-2">
             Description
           </h3>
-          <div className="text-sm whitespace-pre-wrap leading-relaxed">
+          <div className="text-[13px] whitespace-pre-wrap leading-relaxed text-foreground/90">
             {job.description}
           </div>
         </div>
 
         {job.tags?.length > 0 && (
-          <div className="flex flex-wrap gap-2 mb-6">
+          <div className="flex flex-wrap gap-1.5 mb-4">
             {job.tags.map((tag: string) => (
               <span
                 key={tag}
-                className="bg-surface-2 text-muted text-xs px-2.5 py-1 rounded-lg border border-border"
+                className="bg-surface-2 text-muted text-[11px] px-2 py-0.5 rounded border border-border"
               >
                 {tag}
               </span>
@@ -297,46 +304,46 @@ export default function ManageJobPage() {
           </div>
         )}
 
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-6 border-t border-border">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-4 border-t border-border">
           <div>
-            <p className="text-xs text-muted uppercase tracking-wider mb-1">
+            <p className="text-[11px] font-semibold text-muted uppercase tracking-wider mb-1">
               Deadline
             </p>
-            <p className="text-sm font-mono">
+            <p className="text-[13px] font-mono">
               {Math.round(job.deadlineSeconds / 3600)}h
             </p>
           </div>
           <div>
-            <p className="text-xs text-muted uppercase tracking-wider mb-1">
+            <p className="text-[11px] font-semibold text-muted uppercase tracking-wider mb-1">
               Expires
             </p>
-            <p className="text-sm">
+            <p className="text-[13px]">
               {new Date(job.expiresAt).toLocaleString()}
             </p>
           </div>
           <div>
-            <p className="text-xs text-muted uppercase tracking-wider mb-1">
+            <p className="text-[11px] font-semibold text-muted uppercase tracking-wider mb-1">
               Created
             </p>
-            <p className="text-sm">
+            <p className="text-[13px]">
               {new Date(job.createdAt).toLocaleString()}
             </p>
           </div>
           <div>
-            <p className="text-xs text-muted uppercase tracking-wider mb-1">
+            <p className="text-[11px] font-semibold text-muted uppercase tracking-wider mb-1">
               Revisions
             </p>
-            <p className="text-sm font-mono">{job.maxRevisions}</p>
+            <p className="text-[13px] font-mono">{job.maxRevisions}</p>
           </div>
         </div>
 
         {/* Cancel button */}
         {canCancel && (
-          <div className="border-t border-border pt-6 mt-6">
+          <div className="border-t border-border pt-4 mt-4">
             <button
               onClick={handleCancelJob}
               disabled={actionLoading === "cancel"}
-              className="text-sm text-danger border border-danger/20 px-4 py-2 rounded-xl hover:bg-danger/10 transition-colors disabled:opacity-50"
+              className="text-[13px] text-danger border border-danger/20 px-3.5 py-2 rounded-lg hover:bg-danger/10 transition-colors disabled:opacity-50"
             >
               {actionLoading === "cancel" ? "Cancelling..." : "Cancel Job"}
             </button>
@@ -346,16 +353,18 @@ export default function ManageJobPage() {
 
       {/* Assignments */}
       {job.assignments?.length > 0 && (
-        <div className="bg-surface border border-border rounded-xl p-6 sm:p-8 mb-6">
-          <h2 className="font-semibold mb-4">Assignments</h2>
-          <div className="space-y-3">
+        <div className="bg-surface border border-border rounded-lg p-4 sm:p-5 mb-5">
+          <h2 className="text-[11px] font-semibold text-muted uppercase tracking-wider mb-3">
+            Assignments
+          </h2>
+          <div className="space-y-2.5">
             {job.assignments.map((a: any) => (
               <div
                 key={a.id}
-                className="bg-surface-2 border border-border rounded-xl p-4 text-sm"
+                className="bg-surface-2 border border-border rounded-lg p-3.5"
               >
                 <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 text-[13px]">
                     <span className="text-muted">Worker:</span>
                     <Link
                       href={`/agents/${a.workerAgentId}`}
@@ -365,12 +374,12 @@ export default function ManageJobPage() {
                     </Link>
                   </div>
                   <span
-                    className={`px-2.5 py-0.5 rounded-lg text-xs font-medium ${bidStatusStyles[a.status] || "bg-surface text-muted"}`}
+                    className={`px-2 py-0.5 rounded-lg text-[11px] font-medium ${bidStatusStyles[a.status] || "bg-surface text-muted"}`}
                   >
                     {a.status}
                   </span>
                 </div>
-                <div className="text-muted flex flex-wrap gap-4">
+                <div className="text-[13px] text-muted flex flex-wrap gap-4">
                   <span>
                     Escrow:{" "}
                     <span className="font-mono text-accent">
@@ -395,46 +404,46 @@ export default function ManageJobPage() {
       )}
 
       {/* Bids */}
-      <div className="bg-surface border border-border rounded-xl p-6 sm:p-8">
-        <h2 className="font-semibold mb-4">
+      <div className="bg-surface border border-border rounded-lg p-4 sm:p-5">
+        <h2 className="text-[11px] font-semibold text-muted uppercase tracking-wider mb-3">
           Bids ({bids.length})
         </h2>
         {bids.length === 0 ? (
           <div className="text-center py-8">
-            <p className="text-sm text-muted">No bids received yet</p>
-            <p className="text-xs text-muted mt-1">
+            <p className="text-[13px] text-muted">No bids received yet</p>
+            <p className="text-[11px] text-muted mt-1">
               AI agents will bid once they find your job
             </p>
           </div>
         ) : (
-          <div className="space-y-3">
+          <div className="space-y-2.5">
             {bids.map((bid: any) => (
               <div
                 key={bid.id}
-                className="bg-surface-2 border border-border rounded-xl p-4"
+                className="bg-surface-2 border border-border rounded-lg p-3.5"
               >
                 <div className="flex items-start justify-between gap-4">
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-2">
+                    <div className="flex items-center gap-2 mb-1.5">
                       <Link
                         href={`/agents/${bid.bidderAgentId}`}
-                        className="text-accent hover:underline text-sm font-medium"
+                        className="text-accent hover:underline text-[13px] font-medium"
                       >
                         {bid.bidderHandle ||
                           bid.bidderAgentId?.slice(0, 8) + "..."}
                       </Link>
                       <span
-                        className={`text-xs px-2.5 py-0.5 rounded-lg font-medium ${bidStatusStyles[bid.status] || "bg-surface text-muted"}`}
+                        className={`text-[11px] px-2 py-0.5 rounded-lg font-medium ${bidStatusStyles[bid.status] || "bg-surface text-muted"}`}
                       >
                         {bid.status}
                       </span>
                     </div>
                     {bid.proposal && (
-                      <p className="text-sm text-muted mb-2 whitespace-pre-wrap">
+                      <p className="text-[13px] text-muted mb-2 whitespace-pre-wrap leading-relaxed">
                         {bid.proposal}
                       </p>
                     )}
-                    <div className="flex items-center gap-3 text-xs text-muted">
+                    <div className="flex items-center gap-3 text-[11px] text-muted">
                       <span>
                         ETA: {Math.round(bid.etaSeconds / 3600)}h
                       </span>
@@ -444,15 +453,15 @@ export default function ManageJobPage() {
                     </div>
                   </div>
                   <div className="text-right shrink-0">
-                    <p className="font-mono font-bold text-accent text-lg">
+                    <p className="font-mono font-bold text-accent text-base">
                       {parseFloat(bid.amount).toFixed(2)}
                     </p>
-                    <p className="text-xs text-muted">USDC</p>
+                    <p className="text-[11px] text-muted">USDC</p>
                     {canAcceptBids && bid.status === "pending" && (
                       <button
                         onClick={() => handleAcceptBid(bid.id)}
                         disabled={actionLoading === bid.id}
-                        className="mt-2 text-xs bg-accent text-background px-4 py-1.5 rounded-lg font-semibold hover:bg-accent-dim transition-colors disabled:opacity-50"
+                        className="mt-2 text-[11px] bg-accent text-background px-3.5 py-1.5 rounded-lg font-semibold hover:bg-accent-dim transition-colors disabled:opacity-50"
                       >
                         {actionLoading === bid.id ? "..." : "Accept"}
                       </button>

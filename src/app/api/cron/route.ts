@@ -9,10 +9,10 @@ import { runAutoRelease } from "@/lib/cron/auto-release";
 import { runDisputeDeadline } from "@/lib/cron/dispute-deadline";
 
 export async function POST(req: NextRequest) {
-  // Verify cron secret
+  // Verify cron secret — always required
   const authHeader = req.headers.get("authorization");
   const cronSecret = process.env.CRON_SECRET;
-  if (cronSecret && authHeader !== `Bearer ${cronSecret}`) {
+  if (!cronSecret || authHeader !== `Bearer ${cronSecret}`) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 

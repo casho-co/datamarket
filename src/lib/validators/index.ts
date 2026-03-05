@@ -36,6 +36,20 @@ const txHash = z
   .string()
   .regex(/^0x[a-fA-F0-9]{64}$/, "Invalid transaction hash");
 
+/** URL validated via the URL constructor — only http/https accepted. */
+const safeUrl = (maxLen = 512) =>
+  z
+    .string()
+    .max(maxLen)
+    .refine((u) => {
+      try {
+        const { protocol } = new URL(u);
+        return protocol === "http:" || protocol === "https:";
+      } catch {
+        return false;
+      }
+    }, "Must be a valid http or https URL");
+
 export const paginationSchema = z.object({
   page: z.coerce.number().int().min(1).default(1),
   limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -65,8 +79,8 @@ export const registerAgentSchema = z.object({
   skill_tags: z.array(z.string().max(50)).max(20).optional(),
   capabilities: z.record(z.string(), z.unknown()).optional(),
   actor_type: z.enum(["human", "agent"]).default("agent"),
-  webhook_url: z.string().url().max(512).optional(),
-  mcp_endpoint: z.string().url().max(512).optional(),
+  webhook_url: safeUrl().optional(),
+  mcp_endpoint: safeUrl().optional(),
 });
 
 export const loginSchema = z.object({
@@ -87,7 +101,7 @@ export const updateAgentSchema = z.object({
   skill_tags: z.array(z.string().max(50)).max(20).optional(),
   capabilities: z.record(z.string(), z.unknown()).optional(),
   availability_status: z.enum(["online", "offline", "busy"]).optional(),
-  webhook_url: z.string().url().max(512).nullable().optional(),
+  webhook_url: safeUrl().nullable().optional(),
   webhook_events: z
     .array(
       z.enum([
@@ -111,7 +125,7 @@ export const updateAgentSchema = z.object({
     .max(15)
     .nullable()
     .optional(),
-  mcp_endpoint: z.string().url().max(512).nullable().optional(),
+  mcp_endpoint: safeUrl().nullable().optional(),
 });
 
 export const createApiKeySchema = z.object({
@@ -144,6 +158,7 @@ export const createJobSchema = z.object({
   requires_verifiable: z.boolean().default(false),
   max_revisions: z.coerce.number().int().min(0).max(10).default(3),
   auto_release_days: z.coerce.number().int().min(1).max(30).default(7),
+  payment_tx_hash: txHash.optional(),
 });
 
 // ═══════════════════════════════════════════════
@@ -235,7 +250,7 @@ export const submitWorkSchema = z
       .enum(["url", "file", "inline", "hash_only"])
       .default("url"),
     // URL submission
-    deliverable_url: z.string().url().max(512).optional(),
+    deliverable_url: safeUrl().optional(),
     // SHA-256 hash for verification
     deliverable_hash: sha256Hash.optional(),
     // R2 file upload ID
@@ -292,7 +307,7 @@ export const openDisputeSchema = z.object({
 
 export const addEvidenceSchema = z.object({
   type: z.enum(["url", "photo", "tracking", "hash"]),
-  url: z.string().url().max(512).optional(),
+  url: safeUrl().optional(),
   description: z.string().max(5000).optional(),
 });
 
@@ -356,7 +371,7 @@ export const reactionSchema = z.object({
 // ═══════════════════════════════════════════════
 
 export const submitEntrySchema = z.object({
-  deliverable_url: z.string().url().max(512),
+  deliverable_url: safeUrl(),
   deliverable_hash: sha256Hash,
 });
 
@@ -459,14 +474,14 @@ export const launchTokenSchema = z.object({
   name: z.string().min(1).max(100),
   symbol: z.string().min(1).max(20),
   description: z.string().min(1).max(5000),
-  image_url: z.string().url().max(512).optional(),
+  image_url: safeUrl().optional(),
   total_supply: z.coerce.number().int().min(1).max(100_000_000_000).default(1_000_000_000),
   raised_amount: z.coerce.number().min(1).max(1000).default(24),
   initial_buy_bnb: z.string().regex(/^\d+(\.\d{1,18})?$/, "Invalid BNB amount").default("0"),
   label: z.string().max(50).default("Meme"),
-  web_url: z.string().url().max(512).optional(),
-  twitter_url: z.string().url().max(512).optional(),
-  telegram_url: z.string().url().max(512).optional(),
+  web_url: safeUrl().optional(),
+  twitter_url: safeUrl().optional(),
+  telegram_url: safeUrl().optional(),
 });
 
 // ═══════════════════════════════════════════════

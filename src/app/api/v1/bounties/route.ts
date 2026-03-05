@@ -32,7 +32,7 @@ export const POST = validatedRoute(
     const auth = await requireScope(req, "financial");
     if (auth instanceof NextResponse) return auth;
 
-    const rl = await checkRateLimit(auth.agentId, "sensitive");
+    const { blocked: rl } = await checkRateLimit(auth.agentId, "sensitive");
     if (rl) return rl;
 
     const nonce = getNonce(req);

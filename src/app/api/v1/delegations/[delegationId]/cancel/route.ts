@@ -11,14 +11,14 @@ export async function POST(
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   const { delegationId } = await params;
 
   try {
     const delegation = await cancelDelegation(delegationId, auth.agentId);
-    return withRateLimitHeaders(NextResponse.json(delegation));
+    return withRateLimitHeaders(NextResponse.json(delegation), rlHeaders);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: safeErrorMessage(err) },

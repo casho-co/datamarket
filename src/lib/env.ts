@@ -14,15 +14,17 @@ const REQUIRED_VARS = [
   "R2_ACCOUNT_ID",
   "R2_ACCESS_KEY_ID",
   "R2_SECRET_ACCESS_KEY",
+  "JWT_SECRET",
+  "WEBHOOK_SECRET",
 ] as const;
 
 const OPTIONAL_VARS = [
   "R2_BUCKET",
-  "WEBHOOK_SECRET",
   "NEXT_PUBLIC_BASE_URL",
   "USDC_BSC_ADDRESS",
   "ERC8004_IDENTITY_REGISTRY",
   "ERC8004_REPUTATION_REGISTRY",
+  "CORS_ALLOWED_ORIGINS",
 ] as const;
 
 export function validateEnv(): { valid: boolean; missing: string[] } {
@@ -35,6 +37,18 @@ export function validateEnv(): { valid: boolean; missing: string[] } {
   }
 
   return { valid: missing.length === 0, missing };
+}
+
+export function validateEnvOrDie(): void {
+  const { valid, missing } = validateEnv();
+  if (!valid) {
+    console.error(
+      `[env] Missing required environment variables: ${missing.join(", ")}`
+    );
+    throw new Error(
+      `Missing required environment variables: ${missing.join(", ")}`
+    );
+  }
 }
 
 export function getEnvSummary(): Record<string, "set" | "missing" | "optional"> {

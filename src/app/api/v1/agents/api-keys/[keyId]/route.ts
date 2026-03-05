@@ -12,7 +12,7 @@ export async function DELETE(
   const auth = await requireScope(req, "admin");
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   const { keyId } = await params;
@@ -28,7 +28,7 @@ export async function DELETE(
       ipAddress: getClientIp(req),
     });
 
-    return withRateLimitHeaders(NextResponse.json({ success: true, key_id: keyId }));
+    return withRateLimitHeaders(NextResponse.json({ success: true, key_id: keyId }), rlHeaders);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: safeErrorMessage(err) },

@@ -30,20 +30,20 @@ const eventConfig: Record<string, { icon: string; color: string }> = {
 function EventIcon({ type }: { type: string }) {
   const config = eventConfig[type];
   const colorMap: Record<string, string> = {
-    green: "bg-green-500/10 border-green-500/20 text-green-400",
-    blue: "bg-blue-500/10 border-blue-500/20 text-blue-400",
-    yellow: "bg-yellow-500/10 border-yellow-500/20 text-yellow-400",
-    purple: "bg-purple-500/10 border-purple-500/20 text-purple-400",
-    accent: "bg-accent/10 border-accent/20 text-accent",
-    red: "bg-red-500/10 border-red-500/20 text-red-400",
-    zinc: "bg-zinc-500/10 border-zinc-500/20 text-zinc-400",
-    orange: "bg-orange-500/10 border-orange-500/20 text-orange-400",
+    green: "bg-green-500/10 text-green-400",
+    blue: "bg-blue-500/10 text-blue-400",
+    yellow: "bg-amber-500/10 text-amber-400",
+    purple: "bg-purple-500/10 text-purple-400",
+    accent: "bg-accent/10 text-accent",
+    red: "bg-red-500/10 text-red-400",
+    zinc: "bg-zinc-500/10 text-zinc-400",
+    orange: "bg-orange-500/10 text-orange-400",
   };
   const c = colorMap[config?.color || "zinc"] || colorMap.zinc;
 
   return (
-    <div className={`w-9 h-9 rounded-lg border flex items-center justify-center shrink-0 ${c}`}>
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <div className={`w-8 h-8 rounded-md flex items-center justify-center shrink-0 ${c}`}>
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
         {config?.icon === "plus" && <path d="M12 5v14M5 12h14" />}
         {config?.icon === "tag" && <><path d="M20.59 13.41l-7.17 7.17a2 2 0 01-2.83 0L2 12V2h10l8.59 8.59a2 2 0 010 2.82z" /><line x1="7" y1="7" x2="7.01" y2="7" /></>}
         {config?.icon === "target" && <><circle cx="12" cy="12" r="10" /><circle cx="12" cy="12" r="6" /><circle cx="12" cy="12" r="2" /></>}
@@ -99,73 +99,94 @@ export default function FeedPage() {
   }, []);
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 py-8">
-      <div className="flex items-center justify-between mb-8">
+    <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
+      {/* Header */}
+      <div className="flex items-start justify-between mb-6">
         <div>
-          <h1 className="text-3xl font-bold">Live Feed</h1>
-          <p className="text-sm text-muted mt-1">Real-time marketplace activity</p>
+          <p className="text-xs font-semibold text-accent uppercase tracking-widest mb-1">Activity</p>
+          <h1 className="text-2xl font-bold tracking-tight">Live Feed</h1>
+          <p className="text-[13px] text-muted mt-1">Real-time marketplace activity</p>
         </div>
-        <div className="flex items-center gap-2 bg-surface border border-border rounded-full px-3 py-1.5">
+        <div className="flex items-center gap-2 bg-surface border border-border rounded-lg px-2.5 py-1.5 mt-1">
           <span
-            className={`w-2 h-2 rounded-full ${connected ? "bg-green-400 animate-pulse-dot" : "bg-red-400"}`}
+            className={`w-1.5 h-1.5 rounded-full ${connected ? "bg-green-400 animate-pulse-dot" : "bg-red-400"}`}
           />
-          <span className="text-xs text-muted">
+          <span className="text-[11px] text-muted font-medium">
             {connected ? "Connected" : "Disconnected"}
           </span>
         </div>
       </div>
 
-      <div className="space-y-2">
-        {events.length === 0 && (
-          <div className="text-center py-20">
-            <div className="w-16 h-16 rounded-2xl bg-surface-2 border border-border flex items-center justify-center mx-auto mb-4">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted">
-                <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </div>
-            <p className="text-muted font-medium">Waiting for events...</p>
-            <p className="text-sm text-muted mt-1">Activity will appear here in real-time</p>
+      {/* Events */}
+      {events.length === 0 && (
+        <div className="bg-surface border border-border rounded-lg py-20 text-center">
+          <div className="w-12 h-12 rounded-lg bg-surface-2 border border-border flex items-center justify-center mx-auto mb-3">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-muted">
+              <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
           </div>
-        )}
-        {events.map((event) => (
-          <div
-            key={event.id}
-            className="bg-surface border border-border rounded-xl p-4 animate-fade-in-up"
-          >
-            <div className="flex items-start gap-3">
-              <EventIcon type={event.event_type} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 mb-1">
-                  <span className="text-sm font-semibold">
-                    {event.event_type.replace(/_/g, " ")}
-                  </span>
-                  <span className="text-xs text-muted">
-                    {new Date(event.created_at).toLocaleTimeString()}
-                  </span>
-                </div>
-                <div className="flex items-center gap-3 text-xs text-muted">
-                  {event.payload?.title && (
-                    <span className="truncate">{event.payload.title}</span>
-                  )}
-                  {event.payload?.amount && (
-                    <span className="font-mono text-accent font-medium">
-                      {event.payload.amount} USDC
+          <p className="text-[13px] text-muted-light font-medium">Waiting for events...</p>
+          <p className="text-[11px] text-muted mt-1">Activity will appear here in real-time</p>
+        </div>
+      )}
+
+      {events.length > 0 && (
+        <div className="bg-border rounded-lg overflow-hidden flex flex-col gap-px">
+          {events.map((event) => (
+            <div
+              key={event.id}
+              className="bg-surface px-3 py-2.5 hover:bg-surface-2/50 transition-colors animate-fade-in-up"
+            >
+              <div className="flex items-center gap-3">
+                <EventIcon type={event.event_type} />
+                <div className="flex-1 min-w-0 flex items-center gap-3">
+                  {/* Type + Time */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-[13px] font-semibold text-foreground capitalize">
+                      {event.event_type.replace(/_/g, " ")}
                     </span>
-                  )}
-                  {event.job_id && (
-                    <a
-                      href={`/jobs/${event.job_id}`}
-                      className="text-accent hover:underline font-medium shrink-0"
-                    >
-                      View Job
-                    </a>
-                  )}
+                    <span className="text-[11px] text-muted">
+                      {new Date(event.created_at).toLocaleTimeString()}
+                    </span>
+                  </div>
+
+                  {/* Spacer */}
+                  <div className="flex-1 min-w-0" />
+
+                  {/* Meta */}
+                  <div className="flex items-center gap-3 shrink-0">
+                    {event.payload?.title && (
+                      <span className="text-[11px] text-muted-light truncate max-w-[200px] hidden sm:inline">
+                        {event.payload.title}
+                      </span>
+                    )}
+                    {event.payload?.amount && (
+                      <span className="font-mono text-[11px] text-accent font-semibold tabular-nums">
+                        {event.payload.amount} USDC
+                      </span>
+                    )}
+                    {event.job_id && (
+                      <a
+                        href={`/jobs/${event.job_id}`}
+                        className="text-[11px] text-muted hover:text-accent font-medium transition-colors"
+                      >
+                        View
+                      </a>
+                    )}
+                  </div>
                 </div>
               </div>
             </div>
-          </div>
-        ))}
-      </div>
+          ))}
+        </div>
+      )}
+
+      {/* Footer count */}
+      {events.length > 0 && (
+        <div className="mt-3 text-right">
+          <span className="text-[11px] text-muted">{events.length} events</span>
+        </div>
+      )}
     </div>
   );
 }

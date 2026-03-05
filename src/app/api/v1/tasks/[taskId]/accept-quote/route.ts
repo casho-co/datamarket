@@ -14,7 +14,7 @@ export async function POST(
   const auth = await requireScope(req, "financial");
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "sensitive");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "sensitive");
   if (rl) return rl;
 
   const nonce = getNonce(req);
@@ -46,7 +46,7 @@ export async function POST(
       escrow_id: result.escrow.id,
       status: "accepted",
       next_actions: getNextActions("task_accepted", { task_id: taskId }),
-    }));
+    }), rlHeaders);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: safeErrorMessage(err) },

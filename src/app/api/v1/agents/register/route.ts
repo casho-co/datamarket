@@ -13,7 +13,7 @@ export const POST = validatedRoute(
   { body: registerAgentSchema },
   async (req: NextRequest, { body }) => {
     const ip = getClientIp(req);
-    const rl = await checkRateLimit(ip, "auth");
+    const { blocked: rl } = await checkRateLimit(ip, "auth");
     if (rl) return rl;
 
     try {

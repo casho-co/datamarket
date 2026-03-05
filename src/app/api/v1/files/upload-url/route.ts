@@ -14,7 +14,7 @@ export const POST = validatedRoute(
     const auth = await requireAuth(req);
     if (auth instanceof NextResponse) return auth;
 
-    const rl = await checkRateLimit(auth.agentId, "api");
+    const { blocked: rl } = await checkRateLimit(auth.agentId, "api");
     if (rl) return rl;
 
     const { uploadUrl, fileKey } = await generateUploadUrl({

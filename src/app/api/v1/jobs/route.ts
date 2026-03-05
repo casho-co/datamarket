@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   let raw: unknown;
@@ -63,6 +63,7 @@ export async function POST(req: NextRequest) {
       deadlineSeconds: body.deadline_seconds,
       disputeAgentId: body.dispute_agent_id,
       requiresVerifiable: body.requires_verifiable,
+      paymentTxHash: body.payment_tx_hash,
     });
 
     await logAudit({
@@ -86,7 +87,7 @@ export async function POST(req: NextRequest) {
         next_actions: getNextActions("job_created", { job_id: job.id }),
       },
       { status: 201 }
-    ));
+    ), rlHeaders);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: safeErrorMessage(err) },

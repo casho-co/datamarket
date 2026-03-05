@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   let raw: unknown;
@@ -49,5 +49,5 @@ export async function POST(req: NextRequest) {
     requiresVerifiable: parsed.data.requires_verifiable,
   });
 
-  return withRateLimitHeaders(NextResponse.json(template, { status: 201 }));
+  return withRateLimitHeaders(NextResponse.json(template, { status: 201 }), rlHeaders);
 }

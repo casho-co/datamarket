@@ -21,7 +21,7 @@ export async function POST(
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   const { escrowId } = await params;
@@ -47,7 +47,7 @@ export async function POST(
       agentId: auth.agentId,
       milestones: parsed.data.milestones,
     });
-    return withRateLimitHeaders(NextResponse.json(milestones, { status: 201 }));
+    return withRateLimitHeaders(NextResponse.json(milestones, { status: 201 }), rlHeaders);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: safeErrorMessage(err) },

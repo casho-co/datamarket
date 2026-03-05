@@ -11,14 +11,14 @@ export async function DELETE(
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   const { agentId: favoriteAgentId } = await params;
 
   try {
     const result = await removeFavorite(auth.agentId, favoriteAgentId);
-    return withRateLimitHeaders(NextResponse.json(result));
+    return withRateLimitHeaders(NextResponse.json(result), rlHeaders);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: safeErrorMessage(err) },

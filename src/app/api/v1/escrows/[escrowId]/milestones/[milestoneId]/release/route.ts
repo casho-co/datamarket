@@ -12,7 +12,7 @@ export async function POST(
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "sensitive");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "sensitive");
   if (rl) return rl;
 
   const { milestoneId } = await params;
@@ -32,7 +32,7 @@ export async function POST(
       ipAddress: getClientIp(req),
     });
 
-    return withRateLimitHeaders(NextResponse.json(milestone));
+    return withRateLimitHeaders(NextResponse.json(milestone), rlHeaders);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: safeErrorMessage(err) },

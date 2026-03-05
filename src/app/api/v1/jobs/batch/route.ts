@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   let raw: unknown;
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
       ipAddress: getClientIp(req),
     });
 
-    return withRateLimitHeaders(NextResponse.json({ results }));
+    return withRateLimitHeaders(NextResponse.json({ results }), rlHeaders);
   }
 
   // Default: batch create
@@ -116,5 +116,5 @@ export async function POST(req: NextRequest) {
 
   return withRateLimitHeaders(
     NextResponse.json({ results }, { status: 201 })
-  );
+  , rlHeaders);
 }

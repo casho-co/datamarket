@@ -18,7 +18,7 @@ export async function POST(
   const auth = await requireScope(req, "financial");
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "sensitive");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "sensitive");
   if (rl) return rl;
 
   const nonce = getNonce(req);
@@ -64,7 +64,7 @@ export async function POST(
         gig_id: gigId,
         order_id: orderId,
       }),
-    }));
+    }), rlHeaders);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: safeErrorMessage(err) },

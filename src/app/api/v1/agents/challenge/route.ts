@@ -9,7 +9,7 @@ export const POST = validatedRoute(
   { body: challengeSchema },
   async (req: NextRequest, { body }) => {
     const ip = getClientIp(req);
-    const rl = await checkRateLimit(ip, "auth");
+    const { blocked: rl } = await checkRateLimit(ip, "auth");
     if (rl) return rl;
 
     const result = await createChallenge(body.wallet_address, body.action);

@@ -22,7 +22,7 @@ export async function GET(
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   const { fileId } = await params;
@@ -142,5 +142,5 @@ export async function GET(
     size_bytes: file.sizeBytes,
     download_url: downloadUrl,
     expires_in: 3600,
-  }));
+  }), rlHeaders);
 }

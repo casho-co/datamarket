@@ -21,7 +21,7 @@ export async function POST(
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   const { jobId } = await params;
@@ -48,7 +48,7 @@ export async function POST(
       deliverableUrl: parsed.data.deliverable_url,
       deliverableHash: parsed.data.deliverable_hash,
     });
-    return withRateLimitHeaders(NextResponse.json(entry, { status: 201 }));
+    return withRateLimitHeaders(NextResponse.json(entry, { status: 201 }), rlHeaders);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: safeErrorMessage(err) },

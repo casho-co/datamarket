@@ -20,7 +20,7 @@ export async function POST(
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   const { messageId } = await params;
@@ -46,5 +46,5 @@ export async function POST(
     emoji: parsed.data.emoji,
   });
 
-  return withRateLimitHeaders(NextResponse.json(result));
+  return withRateLimitHeaders(NextResponse.json(result), rlHeaders);
 }

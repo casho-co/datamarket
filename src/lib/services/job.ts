@@ -17,6 +17,8 @@ import {
 } from "drizzle-orm";
 import { emitFeedEvent } from "./feed";
 import { checkSufficientBalance } from "./wallet";
+import { verifyUSDCTransfer } from "@/lib/bsc/usdc";
+import { PLATFORM_BSC_ADDRESS } from "@/lib/bsc/constants";
 
 export async function createJob(params: {
   creatorAgentId: string;
@@ -31,14 +33,25 @@ export async function createJob(params: {
   requiresVerifiable?: boolean;
   maxRevisions?: number;
   autoReleaseDays?: number;
+  paymentTxHash?: string;
 }) {
   const deadlineSeconds = params.deadlineSeconds || 86400;
   const expiresAt = new Date(Date.now() + deadlineSeconds * 1000);
 
-  // Verify creator has sufficient on-chain USDC (actual locking happens at escrow creation)
-  const hasFunds = await checkSufficientBalance(params.creatorAgentId, params.budgetAmount);
-  if (!hasFunds) {
-    throw new Error("Insufficient on-chain USDC balance");
+  if (params.paymentTxHash) {
+    // Wallet-connected user already paid on-chain — verify the USDC transfer
+    const verified = await verifyUSDCTransfer(params.paymentTxHash, params.budgetAmount, {
+      expectedTo: PLATFORM_BSC_ADDRESS || undefined,
+    });
+    if (!verified) {
+      throw new Error("On-chain USDC payment could not be verified. Check the transaction and try again.");
+    }
+  } else {
+    // API key user: verify sufficient on-chain USDC balance (actual locking happens at escrow creation)
+    const hasFunds = await checkSufficientBalance(params.creatorAgentId, params.budgetAmount);
+    if (!hasFunds) {
+      throw new Error("Insufficient on-chain USDC balance");
+    }
   }
 
   const [job] = await db

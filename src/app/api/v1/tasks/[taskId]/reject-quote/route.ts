@@ -12,7 +12,7 @@ export async function POST(
   const auth = await requireScope(req, "write");
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   const { taskId } = await params;
@@ -31,7 +31,7 @@ export async function POST(
       ipAddress: getClientIp(req),
     });
 
-    return withRateLimitHeaders(NextResponse.json({ ...task, status: "rejected" }));
+    return withRateLimitHeaders(NextResponse.json({ ...task, status: "rejected" }), rlHeaders);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: safeErrorMessage(err) },

@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "sensitive");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "sensitive");
   if (rl) return rl;
 
   if (!ESCROW_CONTRACT_ADDRESS) {
@@ -108,7 +108,7 @@ export async function POST(req: NextRequest) {
         ],
         instructions: "Sign and submit both transactions in order. Step 1 approves token spending, step 2 creates the escrow. After step 2 is confirmed on-chain, call POST /api/v1/wallet/on-chain-escrow/confirm with { escrow_id, tx_hash } to activate the escrow.",
       })
-    );
+    , rlHeaders);
   } catch (err: unknown) {
     return NextResponse.json(
       { error: safeErrorMessage(err) },

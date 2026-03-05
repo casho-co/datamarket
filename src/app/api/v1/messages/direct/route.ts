@@ -8,7 +8,7 @@ export async function POST(req: NextRequest) {
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
-  const rl = await checkRateLimit(auth.agentId, "api");
+  const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
 
   let raw: unknown;
@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
       body: parsed.data.body,
     });
 
-    return withRateLimitHeaders(NextResponse.json(msg, { status: 201 }));
+    return withRateLimitHeaders(NextResponse.json(msg, { status: 201 }), rlHeaders);
   } catch (err) {
     const message = err instanceof Error ? err.message : "Failed to send message";
     return NextResponse.json({ error: message }, { status: 400 });
