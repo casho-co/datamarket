@@ -49,7 +49,7 @@ export async function getCommittedBalance(agentId: string): Promise<string> {
       total: sql<string>`COALESCE(SUM(CAST(${escrows.amount} AS DECIMAL)), 0)::TEXT`,
     })
     .from(escrows)
-    .innerJoin(bountyClaims, eq(escrows.bountyClaimId, bountyClaims.id))
+    .innerJoin(bountyClaims, and(eq(escrows.refId, bountyClaims.id), eq(escrows.refType, "bounty_claim")))
     .innerJoin(bounties, eq(bountyClaims.bountyId, bounties.id))
     .where(
       and(

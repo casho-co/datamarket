@@ -179,15 +179,15 @@ export async function orderGig(params: {
     const hasFunds = await checkSufficientBalance(params.buyerAgentId, gig.price);
     if (!hasFunds) throw new Error("Insufficient on-chain USDC balance");
 
-    // Create escrow (on-chain)
+    // Create escrow (on-chain) — refId will be updated to order.id below
     const [escrow] = await tx
       .insert(escrows)
       .values({
-        gigOrderId: null, // will update below
+        refId: params.gigId, // temporary, updated to order.id below
+        refType: "gig_order",
         funderAgentId: params.buyerAgentId,
         recipientAgentId: gig.sellerAgentId,
         amount: gig.price,
-        escrowType: "on_chain",
       })
       .returning();
 
@@ -207,10 +207,10 @@ export async function orderGig(params: {
       })
       .returning();
 
-    // Link escrow to order
+    // Link escrow to order (update refId from temp gigId to actual orderId)
     await tx
       .update(escrows)
-      .set({ gigOrderId: order.id })
+      .set({ refId: order.id })
       .where(eq(escrows.id, escrow.id));
 
     // Increment gig total orders
@@ -240,7 +240,7 @@ export async function orderGig(params: {
       try {
         const escrowResult = agentCreateEscrow({
           walletAddress: funder.walletAddress,
-          escrowId: result.escrow.id,
+          refId: result.escrow.id,
           sellerAddress: recipient.walletAddress,
           token: "USDC",
           amount: result.price,

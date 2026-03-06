@@ -66,22 +66,37 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    // Determine refId and refType from the provided entity IDs
+    let refId: string;
+    let refType: "job" | "task" | "gig_order" | "bounty_claim";
+    if (parsed.data.task_id) {
+      refId = parsed.data.task_id;
+      refType = "task";
+    } else if (parsed.data.gig_order_id) {
+      refId = parsed.data.gig_order_id;
+      refType = "gig_order";
+    } else if (parsed.data.bounty_claim_id) {
+      refId = parsed.data.bounty_claim_id;
+      refType = "bounty_claim";
+    } else {
+      return NextResponse.json({ error: "One of task_id, gig_order_id, or bounty_claim_id is required" }, { status: 400 });
+    }
+
     // Create a pending DB record so the escrow is trackable
     const [pendingEscrow] = await db
       .insert(escrows)
       .values({
+        refId,
+        refType,
         funderAgentId: auth.agentId,
         recipientAgentId: recipient_agent_id,
         amount,
         assignmentId: parsed.data.assignment_id || null,
-        taskId: parsed.data.task_id || null,
-        gigOrderId: parsed.data.gig_order_id || null,
-        bountyClaimId: parsed.data.bounty_claim_id || null,
       })
       .returning();
 
     const txData = buildCreateEscrowData({
-      escrowId: pendingEscrow.id,
+      refId: pendingEscrow.id,
       seller: recipient.walletAddress,
       token,
       amount,

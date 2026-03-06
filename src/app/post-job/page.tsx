@@ -3,25 +3,7 @@
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-context";
-import { useWriteContract, useWaitForTransactionReceipt, useAccount } from "wagmi";
-import { parseUnits } from "viem";
-
-const USDC_ADDRESS = "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d" as const;
-const USDC_DECIMALS = 18;
-const PLATFORM_WALLET = "0xa4DF1607CCc0f2EdF20f26BF83cDEE157C4d5d1e";
-
-const ERC20_TRANSFER_ABI = [
-  {
-    name: "transfer",
-    type: "function",
-    stateMutability: "nonpayable",
-    inputs: [
-      { name: "to", type: "address" },
-      { name: "amount", type: "uint256" },
-    ],
-    outputs: [{ name: "", type: "bool" }],
-  },
-] as const;
+import { useWriteContract, useWaitForTransactionReceipt, useAccount, useSendTransaction } from "wagmi";
 
 const deadlineOptions = [
   { label: "1 hour", value: 3600 },
@@ -31,6 +13,9 @@ const deadlineOptions = [
   { label: "3 days", value: 259200 },
   { label: "7 days", value: 604800 },
 ];
+
+type UnsignedTx = { to: string; data: string };
+type Step = "idle" | "creating" | "approving" | "escrow" | "confirming" | "verifying";
 
 export default function PostJobPage() {
   const router = useRouter();
@@ -50,13 +35,24 @@ export default function PostJobPage() {
 
   const [balance, setBalance] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [step, setStep] = useState<"idle" | "signing" | "confirming" | "posting">("idle");
+  const [step, setStep] = useState<Step>("idle");
   const [error, setError] = useState("");
   const [fieldErrors, setFieldErrors] = useState<Record<string, string[]>>({});
 
-  const { writeContract, data: txHash, error: writeError, reset: resetWrite } = useWriteContract();
-  const { isSuccess: txConfirmed, isLoading: txConfirming } = useWaitForTransactionReceipt({
-    hash: txHash,
+  // Job state from API
+  const [pendingJobId, setPendingJobId] = useState<string | null>(null);
+  const [unsignedTxs, setUnsignedTxs] = useState<{ approve: UnsignedTx; createEscrow: UnsignedTx } | null>(null);
+
+  // TX 1: Approve USDC spending
+  const { sendTransaction: sendApprove, data: approveTxHash, error: approveError, reset: resetApprove } = useSendTransaction();
+  const { isSuccess: approveConfirmed, isLoading: approveConfirming } = useWaitForTransactionReceipt({
+    hash: approveTxHash,
+  });
+
+  // TX 2: Create escrow on-chain
+  const { sendTransaction: sendEscrow, data: escrowTxHash, error: escrowError, reset: resetEscrow } = useSendTransaction();
+  const { isSuccess: escrowConfirmed, isLoading: escrowConfirming } = useWaitForTransactionReceipt({
+    hash: escrowTxHash,
   });
 
   useEffect(() => {
@@ -78,36 +74,192 @@ export default function PostJobPage() {
     })();
   }, [isAuthenticated, getToken]);
 
-  // Handle write contract errors
+  // Handle approve errors
   useEffect(() => {
-    if (writeError) {
-      const msg = writeError.message || "Transaction failed";
-      // Extract user-friendly message from viem errors
-      if (msg.includes("User rejected") || msg.includes("denied")) {
-        setError("Transaction rejected by wallet");
-      } else if (msg.includes("insufficient")) {
-        setError("Insufficient USDC balance for this transaction");
-      } else {
-        setError(msg.length > 200 ? msg.slice(0, 200) + "..." : msg);
+    if (approveError) {
+      handleTxError(approveError);
+    }
+  }, [approveError]);
+
+  // Handle escrow errors
+  useEffect(() => {
+    if (escrowError) {
+      handleTxError(escrowError);
+    }
+  }, [escrowError]);
+
+  // After approve confirmed → send escrow tx
+  useEffect(() => {
+    if (approveConfirmed && unsignedTxs && step === "approving") {
+      setStep("escrow");
+      sendEscrow({
+        to: unsignedTxs.createEscrow.to as `0x${string}`,
+        data: unsignedTxs.createEscrow.data as `0x${string}`,
+      });
+    }
+  }, [approveConfirmed, unsignedTxs, step]);
+
+  // Track approve confirming
+  useEffect(() => {
+    if (approveConfirming && step === "approving") {
+      // Still approving, waiting for confirmation
+    }
+  }, [approveConfirming, step]);
+
+  // Track escrow confirming
+  useEffect(() => {
+    if (escrowConfirming && step === "escrow") {
+      setStep("confirming");
+    }
+  }, [escrowConfirming, step]);
+
+  // After escrow confirmed → verify with backend
+  useEffect(() => {
+    if (escrowConfirmed && escrowTxHash && pendingJobId) {
+      verifyWithBackend(escrowTxHash, pendingJobId);
+    }
+  }, [escrowConfirmed, escrowTxHash, pendingJobId]);
+
+  function handleTxError(err: Error) {
+    const msg = err.message || "Transaction failed";
+    if (msg.includes("User rejected") || msg.includes("denied")) {
+      setError("Transaction rejected by wallet");
+    } else if (msg.includes("insufficient")) {
+      setError("Insufficient USDC balance for this transaction");
+    } else {
+      setError(msg.length > 200 ? msg.slice(0, 200) + "..." : msg);
+    }
+    setSubmitting(false);
+    setStep("idle");
+  }
+
+  async function verifyWithBackend(txHash: string, jobId: string) {
+    setStep("verifying");
+
+    const token = await getToken();
+    if (!token) {
+      setError("Authentication expired. Please login again.");
+      setSubmitting(false);
+      setStep("idle");
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/v1/wallet/submit-tx", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ tx_hash: txHash, job_id: jobId }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Failed to verify job funding");
+        setSubmitting(false);
+        setStep("idle");
+        return;
       }
+
+      router.push(`/my-jobs/${jobId}`);
+    } catch {
+      setError("Network error. Please try again.");
       setSubmitting(false);
       setStep("idle");
     }
-  }, [writeError]);
+  }
 
-  // Handle tx confirmation → submit job to backend
-  useEffect(() => {
-    if (txConfirmed && txHash && step === "confirming") {
-      submitJobToBackend(txHash);
-    }
-  }, [txConfirmed, txHash, step]);
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setSubmitting(true);
+    setError("");
+    setFieldErrors({});
+    resetApprove();
+    resetEscrow();
 
-  // Update step when tx is confirming
-  useEffect(() => {
-    if (txConfirming && step === "signing") {
-      setStep("confirming");
+    if (!connectedAddress) {
+      setError("Wallet not connected. Please reconnect.");
+      setSubmitting(false);
+      return;
     }
-  }, [txConfirming, step]);
+
+    if (!budgetAmount || parseFloat(budgetAmount) <= 0) {
+      setError("Budget amount must be greater than 0");
+      setSubmitting(false);
+      return;
+    }
+
+    setStep("creating");
+
+    const token = await getToken();
+    if (!token) {
+      setError("Authentication expired. Please login again.");
+      setSubmitting(false);
+      setStep("idle");
+      return;
+    }
+
+    const tags = tagsInput.split(",").map((t) => t.trim()).filter(Boolean);
+
+    const body: Record<string, unknown> = {
+      title,
+      description,
+      budget_amount: budgetAmount,
+      job_type: jobType,
+      deadline_seconds: deadlineSeconds,
+      requires_verifiable: requiresVerifiable,
+      max_revisions: maxRevisions,
+      auto_release_days: autoReleaseDays,
+    };
+    if (tags.length > 0) body.tags = tags;
+
+    try {
+      // Step 1: Create job draft + get unsigned TXes
+      const res = await fetch("/api/v1/jobs", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(body),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        if (data.details) setFieldErrors(data.details);
+        setError(data.error || "Failed to create job");
+        setSubmitting(false);
+        setStep("idle");
+        return;
+      }
+
+      setPendingJobId(data.id);
+      setUnsignedTxs(data.unsigned_txs);
+
+      // Step 2: Send approve TX
+      setStep("approving");
+      sendApprove({
+        to: data.unsigned_txs.approve.to as `0x${string}`,
+        data: data.unsigned_txs.approve.data as `0x${string}`,
+      });
+    } catch {
+      setError("Network error. Please try again.");
+      setSubmitting(false);
+      setStep("idle");
+    }
+  }
+
+  const stepLabels: Record<Step, string> = {
+    idle: "Post Job",
+    creating: "Creating Job...",
+    approving: "Approve USDC Spending...",
+    escrow: "Lock Funds in Escrow...",
+    confirming: "Confirming on-chain...",
+    verifying: "Verifying...",
+  };
 
   if (isLoading) {
     return (
@@ -144,110 +296,12 @@ export default function PostJobPage() {
     );
   }
 
-  async function submitJobToBackend(paymentTxHash: string) {
-    setStep("posting");
-
-    const token = await getToken();
-    if (!token) {
-      setError("Authentication expired. Please login again.");
-      setSubmitting(false);
-      setStep("idle");
-      return;
-    }
-
-    const tags = tagsInput.split(",").map((t) => t.trim()).filter(Boolean);
-
-    const body: Record<string, unknown> = {
-      title,
-      description,
-      budget_amount: budgetAmount,
-      job_type: jobType,
-      deadline_seconds: deadlineSeconds,
-      requires_verifiable: requiresVerifiable,
-      max_revisions: maxRevisions,
-      auto_release_days: autoReleaseDays,
-      payment_tx_hash: paymentTxHash,
-    };
-    if (tags.length > 0) body.tags = tags;
-
-    try {
-      const res = await fetch("/api/v1/jobs", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(body),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        if (data.details) setFieldErrors(data.details);
-        setError(data.error || "Failed to create job");
-        setSubmitting(false);
-        setStep("idle");
-        return;
-      }
-
-      router.push(`/my-jobs/${data.id}`);
-    } catch {
-      setError("Network error. Please try again.");
-      setSubmitting(false);
-      setStep("idle");
-    }
-  }
-
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setSubmitting(true);
-    setError("");
-    setFieldErrors({});
-    resetWrite();
-
-    if (!connectedAddress) {
-      setError("Wallet not connected. Please reconnect.");
-      setSubmitting(false);
-      return;
-    }
-
-    if (!budgetAmount || parseFloat(budgetAmount) <= 0) {
-      setError("Budget amount must be greater than 0");
-      setSubmitting(false);
-      return;
-    }
-
-    setStep("signing");
-
-    try {
-      const amountWei = parseUnits(budgetAmount, USDC_DECIMALS);
-
-      writeContract({
-        address: USDC_ADDRESS,
-        abi: ERC20_TRANSFER_ABI,
-        functionName: "transfer",
-        args: [PLATFORM_WALLET as `0x${string}`, amountWei],
-      });
-    } catch (err: any) {
-      setError(err?.message || "Failed to initiate transaction");
-      setSubmitting(false);
-      setStep("idle");
-    }
-  }
-
-  const stepLabels = {
-    idle: "Post Job",
-    signing: "Approve in Wallet...",
-    confirming: "Confirming on-chain...",
-    posting: "Creating Job...",
-  };
-
   return (
     <div className="max-w-2xl mx-auto px-4 sm:px-6 py-8">
       <div className="mb-6">
         <h1 className="text-2xl font-bold">Post a Job</h1>
         <p className="text-[13px] text-muted mt-1">
-          Create a job listing for AI agents to bid on. Budget is transferred on-chain via your wallet.
+          Create a job listing for AI agents to bid on. Budget is locked in escrow via your wallet.
         </p>
       </div>
 
@@ -435,10 +489,10 @@ export default function PostJobPage() {
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-accent shrink-0">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
                 </svg>
-                <span className="font-medium">On-chain Payment</span>
+                <span className="font-medium">Escrow Payment</span>
               </div>
               <p className="text-muted">
-                <span className="font-mono text-accent">{budgetAmount} USDC</span> will be transferred from your wallet when you submit.
+                <span className="font-mono text-accent">{budgetAmount} USDC</span> will be locked in escrow directly from your wallet. You will sign two transactions: approve + escrow lock.
               </p>
             </div>
           )}

@@ -18,7 +18,7 @@ const ESCROW_ABI = [
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
-      { name: "escrowId", type: "bytes32" },
+      { name: "refId", type: "bytes32" },
       { name: "seller", type: "address" },
       { name: "token", type: "address" },
       { name: "amount", type: "uint256" },
@@ -28,11 +28,39 @@ const ESCROW_ABI = [
     outputs: [],
   },
   {
+    name: "cancelUnassigned",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "refId", type: "bytes32" }],
+    outputs: [],
+  },
+  {
+    name: "assignSeller",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "refId", type: "bytes32" },
+      { name: "seller", type: "address" },
+    ],
+    outputs: [],
+  },
+  {
+    name: "assignSellerAndAdjust",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [
+      { name: "refId", type: "bytes32" },
+      { name: "seller", type: "address" },
+      { name: "newAmount", type: "uint256" },
+    ],
+    outputs: [],
+  },
+  {
     name: "markDelivered",
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
-      { name: "escrowId", type: "bytes32" },
+      { name: "refId", type: "bytes32" },
       { name: "deliverableHash", type: "bytes32" },
     ],
     outputs: [],
@@ -41,21 +69,21 @@ const ESCROW_ABI = [
     name: "dispute",
     type: "function",
     stateMutability: "nonpayable",
-    inputs: [{ name: "escrowId", type: "bytes32" }],
+    inputs: [{ name: "refId", type: "bytes32" }],
     outputs: [],
   },
   {
     name: "release",
     type: "function",
     stateMutability: "nonpayable",
-    inputs: [{ name: "escrowId", type: "bytes32" }],
+    inputs: [{ name: "refId", type: "bytes32" }],
     outputs: [],
   },
   {
     name: "refund",
     type: "function",
     stateMutability: "nonpayable",
-    inputs: [{ name: "escrowId", type: "bytes32" }],
+    inputs: [{ name: "refId", type: "bytes32" }],
     outputs: [],
   },
   {
@@ -63,7 +91,7 @@ const ESCROW_ABI = [
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
-      { name: "escrowId", type: "bytes32" },
+      { name: "refId", type: "bytes32" },
       { name: "releaseToSeller", type: "bool" },
     ],
     outputs: [],
@@ -73,7 +101,7 @@ const ESCROW_ABI = [
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
-      { name: "escrowId", type: "bytes32" },
+      { name: "refId", type: "bytes32" },
       { name: "sellerBps", type: "uint256" },
     ],
     outputs: [],
@@ -82,21 +110,21 @@ const ESCROW_ABI = [
     name: "isAutoReleaseReady",
     type: "function",
     stateMutability: "view",
-    inputs: [{ name: "escrowId", type: "bytes32" }],
+    inputs: [{ name: "refId", type: "bytes32" }],
     outputs: [{ name: "", type: "bool" }],
   },
   {
     name: "isRefundReady",
     type: "function",
     stateMutability: "view",
-    inputs: [{ name: "escrowId", type: "bytes32" }],
+    inputs: [{ name: "refId", type: "bytes32" }],
     outputs: [{ name: "", type: "bool" }],
   },
   {
     name: "getEscrow",
     type: "function",
     stateMutability: "view",
-    inputs: [{ name: "escrowId", type: "bytes32" }],
+    inputs: [{ name: "refId", type: "bytes32" }],
     outputs: [
       {
         name: "",
@@ -207,16 +235,16 @@ function getContractAddress(): Hex {
 
 /**
  * Build unsigned createEscrow transaction data.
- * Non-custodial agents sign this locally.
+ * Returns both approve and createEscrow TXes for the agent to sign.
  */
 export function buildCreateEscrowData(params: {
-  escrowId: string;
+  refId: string;
   seller: string;
   token: SupportedToken;
   amount: string;
   deadlineHours: number;
   disputeWindowHours: number;
-}): { to: string; data: Hex; approveData: { to: string; data: Hex } } {
+}): { to: string; data: Hex; approveData: { to: string; data: Hex }; amountWei: string } {
   const tokenAddress = TOKEN_ADDRESSES[params.token];
   const amountWei = parseTokenAmount(params.amount, params.token);
   const contractAddr = getContractAddress();
@@ -225,7 +253,7 @@ export function buildCreateEscrowData(params: {
     abi: ESCROW_ABI,
     functionName: "createEscrow",
     args: [
-      uuidToBytes32(params.escrowId),
+      uuidToBytes32(params.refId),
       params.seller as Hex,
       tokenAddress as Hex,
       amountWei,
@@ -234,7 +262,6 @@ export function buildCreateEscrowData(params: {
     ],
   });
 
-  // Agent also needs to approve the escrow contract to spend tokens
   const approveData = encodeFunctionData({
     abi: ERC20_APPROVE_ABI,
     functionName: "approve",
@@ -245,6 +272,7 @@ export function buildCreateEscrowData(params: {
     to: contractAddr,
     data,
     approveData: { to: tokenAddress, data: approveData },
+    amountWei: amountWei.toString(),
   };
 }
 
@@ -252,7 +280,7 @@ export function buildCreateEscrowData(params: {
  * Build unsigned markDelivered transaction data.
  */
 export function buildMarkDeliveredData(params: {
-  escrowId: string;
+  refId: string;
   deliverableHash: string;
 }): { to: string; data: Hex } {
   return {
@@ -260,7 +288,7 @@ export function buildMarkDeliveredData(params: {
     data: encodeFunctionData({
       abi: ESCROW_ABI,
       functionName: "markDelivered",
-      args: [uuidToBytes32(params.escrowId), params.deliverableHash as Hex],
+      args: [uuidToBytes32(params.refId), params.deliverableHash as Hex],
     }),
   };
 }
@@ -268,13 +296,13 @@ export function buildMarkDeliveredData(params: {
 /**
  * Build unsigned dispute transaction data.
  */
-export function buildDisputeData(escrowId: string): { to: string; data: Hex } {
+export function buildDisputeData(refId: string): { to: string; data: Hex } {
   return {
     to: getContractAddress(),
     data: encodeFunctionData({
       abi: ESCROW_ABI,
       functionName: "dispute",
-      args: [uuidToBytes32(escrowId)],
+      args: [uuidToBytes32(refId)],
     }),
   };
 }
@@ -282,89 +310,95 @@ export function buildDisputeData(escrowId: string): { to: string; data: Hex } {
 /**
  * Build unsigned release transaction data.
  */
-export function buildReleaseData(escrowId: string): { to: string; data: Hex } {
+export function buildReleaseData(refId: string): { to: string; data: Hex } {
   return {
     to: getContractAddress(),
     data: encodeFunctionData({
       abi: ESCROW_ABI,
       functionName: "release",
-      args: [uuidToBytes32(escrowId)],
+      args: [uuidToBytes32(refId)],
     }),
   };
 }
 
-// ============ AGENT WALLET ESCROW (non-custodial only) ============
+// ============ AGENT WALLET ESCROW (non-custodial) ============
 
 /**
- * Build unsigned escrow transaction for the agent to sign locally.
- * All agents are non-custodial — they sign their own transactions.
+ * Build unsigned escrow transactions for the agent to sign locally.
+ * Returns both approve and createEscrow TXes plus the exact amountWei.
  */
 export function agentCreateEscrow(params: {
   walletAddress: string;
-  escrowId: string;
+  refId: string;
   sellerAddress: string;
   token: SupportedToken;
   amount: string;
   deadlineHours: number;
   disputeWindowHours: number;
-}): { unsignedTx: { approveData: { to: string; data: Hex }; to: string; data: Hex } } {
+}): { unsignedTxs: { approve: { to: string; data: Hex }; createEscrow: { to: string; data: Hex } }; amountWei: string } {
   const txData = buildCreateEscrowData({
-    escrowId: params.escrowId,
+    refId: params.refId,
     seller: params.sellerAddress,
     token: params.token,
     amount: params.amount,
     deadlineHours: params.deadlineHours,
     disputeWindowHours: params.disputeWindowHours,
   });
-  return { unsignedTx: txData };
+  return {
+    unsignedTxs: {
+      approve: txData.approveData,
+      createEscrow: { to: txData.to, data: txData.data },
+    },
+    amountWei: txData.amountWei,
+  };
 }
 
 // ============ ORACLE EXECUTION (platform operations) ============
 
 /**
- * Oracle creates an escrow on-chain. Platform wallet signs the tx.
- * For custodial agents: platform acts on behalf of the buyer.
+ * Oracle assigns a seller to an escrow where seller was address(0).
  */
-export async function oracleCreateEscrow(params: {
-  escrowId: string;
-  buyerAddress: string;
-  sellerAddress: string;
-  token: SupportedToken;
-  amount: string;
-  deadlineHours: number;
-  disputeWindowHours: number;
-}): Promise<string> {
+export async function oracleAssignSeller(
+  entityId: string,
+  sellerAddress: string
+): Promise<string> {
   const walletClient = getWalletClient();
   const account = getPlatformAccount();
   const publicClient = getPublicClient();
-  const contractAddr = getContractAddress();
-  const tokenAddress = TOKEN_ADDRESSES[params.token] as Hex;
-  const amountWei = parseTokenAmount(params.amount, params.token);
 
-  // Step 1: Approve escrow contract to spend tokens
-  const approveHash = await walletClient.writeContract({
-    address: tokenAddress,
-    abi: ERC20_APPROVE_ABI,
-    functionName: "approve",
-    args: [contractAddr, amountWei],
+  const hash = await walletClient.writeContract({
+    address: getContractAddress(),
+    abi: ESCROW_ABI,
+    functionName: "assignSeller",
+    args: [uuidToBytes32(entityId), sellerAddress as Hex],
     account,
     chain: bsc,
   });
-  await publicClient.waitForTransactionReceipt({ hash: approveHash });
 
-  // Step 2: Create escrow
+  await publicClient.waitForTransactionReceipt({ hash });
+  return hash;
+}
+
+/**
+ * Oracle assigns seller and adjusts amount atomically.
+ * If newAmount < current amount, difference is refunded to buyer on-chain.
+ */
+export async function oracleAssignSellerAndAdjust(
+  entityId: string,
+  sellerAddress: string,
+  newAmount: string,
+  token: SupportedToken = "USDC"
+): Promise<string> {
+  const walletClient = getWalletClient();
+  const account = getPlatformAccount();
+  const publicClient = getPublicClient();
+  const amountWei = parseTokenAmount(newAmount, token);
+
   const hash = await walletClient.writeContract({
-    address: contractAddr,
+    address: getContractAddress(),
     abi: ESCROW_ABI,
-    functionName: "createEscrow",
-    args: [
-      uuidToBytes32(params.escrowId),
-      params.sellerAddress as Hex,
-      tokenAddress,
-      amountWei,
-      BigInt(params.deadlineHours),
-      BigInt(params.disputeWindowHours),
-    ],
+    functionName: "assignSellerAndAdjust",
+    args: [uuidToBytes32(entityId), sellerAddress as Hex, amountWei],
     account,
     chain: bsc,
   });
@@ -490,16 +524,16 @@ export async function oracleResolveDisputeSplit(
 // ============ VIEW FUNCTIONS ============
 
 /**
- * Read on-chain escrow state.
+ * Read on-chain escrow state by entity UUID (jobId, taskId, etc.).
  */
-export async function getOnChainEscrow(escrowId: string): Promise<OnChainEscrow> {
+export async function getOnChainEscrow(entityId: string): Promise<OnChainEscrow> {
   const publicClient = getPublicClient();
 
   const result = await publicClient.readContract({
     address: getContractAddress(),
     abi: ESCROW_ABI,
     functionName: "getEscrow",
-    args: [uuidToBytes32(escrowId)],
+    args: [uuidToBytes32(entityId)],
   });
 
   const data = result as unknown as {

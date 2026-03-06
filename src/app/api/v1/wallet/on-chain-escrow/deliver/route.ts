@@ -59,7 +59,7 @@ export async function POST(req: NextRequest) {
     // All agents are non-custodial — return unsigned tx data
     const delivHash = hashDeliverable(deliverable_content);
     const txData = buildMarkDeliveredData({
-      escrowId: escrow_id,
+      refId: escrow_id,
       deliverableHash: delivHash,
     });
 

@@ -56,6 +56,15 @@ export async function POST(
 
   const body = parsed.data;
 
+  // Check job is funded/verified before accepting bids
+  const job = await getJobById(jobId);
+  if (!job) {
+    return NextResponse.json({ error: "Job not found" }, { status: 404 });
+  }
+  if (!job.verified) {
+    return NextResponse.json({ error: "Job not yet funded" }, { status: 400 });
+  }
+
   try {
     const bid = await placeBid({
       jobId,
@@ -75,7 +84,6 @@ export async function POST(
     });
 
     // Notify job creator
-    const job = await getJobById(jobId);
     if (job) {
       deliverWebhook(job.creatorAgentId, "bid.received", {
         job_id: jobId,

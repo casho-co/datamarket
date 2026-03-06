@@ -120,17 +120,18 @@ export async function resolveCompetition(params: {
             const [escrow] = await tx
               .insert(escrows)
               .values({
+                refId: params.jobId,
+                refType: "job",
                 funderAgentId: params.judgeAgentId,
                 recipientAgentId: entry.agentId,
                 amount: prizeAmount.toFixed(6),
-                escrowType: "on_chain",
               })
               .returning();
 
             // Build unsigned escrow tx for the agent to sign
             const escrowResult = agentCreateEscrow({
               walletAddress: funder.walletAddress,
-              escrowId: escrow.id,
+              refId: escrow.id,
               sellerAddress: recipient.walletAddress,
               token: "USDC",
               amount: prizeAmount.toFixed(6),

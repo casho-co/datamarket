@@ -249,7 +249,6 @@ export async function runAutoRelease() {
       .from(escrows)
       .where(
         and(
-          eq(escrows.escrowType, "on_chain"),
           eq(escrows.status, "funded"),
           isNotNull(escrows.onChainTxHash)
         )

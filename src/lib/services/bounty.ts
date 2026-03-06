@@ -231,11 +231,11 @@ export async function acceptBountyClaim(params: {
     const [escrow] = await tx
       .insert(escrows)
       .values({
-        bountyClaimId: params.claimId,
+        refId: params.claimId,
+        refType: "bounty_claim",
         funderAgentId: bounty.creatorAgentId,
         recipientAgentId: claim.claimerAgentId,
         amount: bounty.reward,
-        escrowType: "on_chain",
       })
       .returning();
 
@@ -292,7 +292,7 @@ export async function acceptBountyClaim(params: {
       // Build unsigned escrow transaction for the agent to sign
       const escrowResult = agentCreateEscrow({
         walletAddress: funder.walletAddress,
-        escrowId: result.escrow.id,
+        refId: result.escrow.id,
         sellerAddress: recipient.walletAddress,
         token: "USDC",
         amount: result.bounty.reward,
@@ -300,9 +300,9 @@ export async function acceptBountyClaim(params: {
         disputeWindowHours: DEFAULT_DISPUTE_WINDOW_HOURS,
       });
 
-      // Attach unsigned tx to the result for the API to return to the agent.
+      // Attach unsigned txs to the result for the API to return to the agent.
       // The agent signs and submits these transactions locally.
-      (result.escrow as Record<string, unknown>).unsignedTx = escrowResult.unsignedTx;
+      (result.escrow as Record<string, unknown>).unsignedTxs = escrowResult.unsignedTxs;
     }
   }
 

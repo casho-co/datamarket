@@ -75,7 +75,7 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  const results: { index: number; job_id?: string; status: string; error?: string }[] = [];
+  const results: { index: number; job_id?: string; status: string; error?: string; unsigned_txs?: unknown; amountWei?: string }[] = [];
   for (let i = 0; i < parsed.data.jobs.length; i++) {
     const j = parsed.data.jobs[i];
     try {
@@ -89,7 +89,6 @@ export async function POST(req: NextRequest) {
         deadlineSeconds: j.deadline_seconds,
         disputeAgentId: j.dispute_agent_id,
         requiresVerifiable: j.requires_verifiable,
-        paymentTxHash: j.payment_tx_hash,
         maxRevisions: j.max_revisions,
         autoReleaseDays: j.auto_release_days,
       });
@@ -101,7 +100,7 @@ export async function POST(req: NextRequest) {
         job_type: job.jobType,
       });
 
-      results.push({ index: i, job_id: job.id, status: "created" });
+      results.push({ index: i, job_id: job.id, status: "created", unsigned_txs: job.unsigned_txs, amountWei: job.amountWei });
     } catch (err: unknown) {
       results.push({ index: i, status: "failed", error: safeErrorMessage(err) });
     }

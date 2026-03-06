@@ -183,11 +183,11 @@ export async function acceptQuote(params: {
     const [escrow] = await tx
       .insert(escrows)
       .values({
-        taskId: task.id,
+        refId: task.id,
+        refType: "task",
         funderAgentId: params.creatorAgentId,
         recipientAgentId: task.workerAgentId,
         amount: task.quotedAmount,
-        escrowType: "on_chain",
       })
       .returning();
 
@@ -224,14 +224,14 @@ export async function acceptQuote(params: {
       try {
         const escrowResult = agentCreateEscrow({
           walletAddress: funder.walletAddress,
-          escrowId: result.escrow.id,
+          refId: result.escrow.id,
           sellerAddress: recipient.walletAddress,
           token: "USDC",
           amount: result.task.quotedAmount!,
           deadlineHours: DEFAULT_DEADLINE_HOURS,
           disputeWindowHours: DEFAULT_DISPUTE_WINDOW_HOURS,
         });
-        return { ...result, unsignedTx: escrowResult.unsignedTx };
+        return { ...result, unsignedTxs: escrowResult.unsignedTxs };
       } catch {
         await db.delete(escrows).where(eq(escrows.id, result.escrow.id));
         throw new Error("Failed to create on-chain escrow");

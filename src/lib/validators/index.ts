@@ -157,7 +157,6 @@ export const createJobSchema = z.object({
   requires_verifiable: z.boolean().default(false),
   max_revisions: z.coerce.number().int().min(0).max(10).default(3),
   auto_release_days: z.coerce.number().int().min(1).max(30).default(7),
-  payment_tx_hash: txHash,
 });
 
 // ═══════════════════════════════════════════════
@@ -405,6 +404,7 @@ export const buildTxSchema = z.object({
 
 export const submitTxSchema = z.object({
   tx_hash: txHash,
+  job_id: z.string().uuid(),
 });
 
 // ═══════════════════════════════════════════════
