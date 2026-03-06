@@ -64,8 +64,11 @@ export const escrowStatusEnum = pgEnum("escrow_status", [
   "disputed",
 ]);
 
-export const escrowTypeEnum = pgEnum("escrow_type", [
-  "on_chain",
+export const escrowRefTypeEnum = pgEnum("escrow_ref_type", [
+  "job",
+  "task",
+  "gig_order",
+  "bounty_claim",
 ]);
 
 export const disputeRulingEnum = pgEnum("dispute_ruling", [
@@ -231,6 +234,7 @@ export const jobs = pgTable(
       .default("USDC")
       .notNull(),
     jobType: jobTypeEnum("job_type").default("standard").notNull(),
+    verified: boolean("verified").default(false).notNull(),
     status: jobStatusEnum("status").default("open").notNull(),
     deadlineSeconds: integer("deadline_seconds").default(86400).notNull(),
     disputeAgentId: uuid("dispute_agent_id").references(() => agents.id),
@@ -325,21 +329,17 @@ export const escrows = pgTable(
   "escrows",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    jobId: uuid("job_id").references(() => jobs.id),
+    refId: uuid("ref_id").notNull(),
+    refType: escrowRefTypeEnum("ref_type").notNull(),
     assignmentId: uuid("assignment_id")
       .references(() => assignments.id)
       .unique(),
-    taskId: uuid("task_id"),
-    gigOrderId: uuid("gig_order_id"),
-    bountyClaimId: uuid("bounty_claim_id"),
     funderAgentId: uuid("funder_agent_id")
       .references(() => agents.id)
       .notNull(),
     recipientAgentId: uuid("recipient_agent_id").references(() => agents.id),
     amount: varchar("amount", { length: 50 }).notNull(),
-    escrowType: escrowTypeEnum("escrow_type").default("on_chain").notNull(),
     status: escrowStatusEnum("status").default("funded").notNull(),
-    fundingTxHash: varchar("funding_tx_hash", { length: 66 }),
     onChainTxHash: varchar("on_chain_tx_hash", { length: 66 }),
     releaseTxHash: varchar("release_tx_hash", { length: 66 }),
     // Buyback-and-burn tracking (for agents with tokens)
@@ -354,12 +354,11 @@ export const escrows = pgTable(
     refundedAt: timestamp("refunded_at"),
   },
   (table) => [
-    index("idx_escrows_job").on(table.jobId),
+    index("idx_escrows_ref").on(table.refId, table.refType),
     index("idx_escrows_assignment").on(table.assignmentId),
-    index("idx_escrows_task").on(table.taskId),
-    index("idx_escrows_gig_order").on(table.gigOrderId),
     index("idx_escrows_status").on(table.status),
     index("idx_escrows_expires").on(table.expiresAt),
+    unique("uq_escrows_on_chain_tx").on(table.onChainTxHash),
   ]
 );
 

@@ -9,8 +9,8 @@ import "@openzeppelin/contracts/access/Ownable.sol";
 
 /// @title DatalayerEscrow
 /// @notice On-chain escrow contract for the Datalayer Market agent marketplace on BSC
-/// @dev Adapted from WildWestEscrowV2. Supports multi-token (USDC + USDT),
-///      configurable fees, split dispute resolution, and oracle-controlled release.
+/// @dev Supports multi-token (USDC + USDT), configurable fees, split dispute resolution,
+///      oracle-controlled release, zero-seller creation, and atomic seller assignment.
 contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
     using SafeERC20 for IERC20;
 
@@ -52,7 +52,7 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
     // ============ EVENTS ============
 
     event EscrowCreated(
-        bytes32 indexed escrowId,
+        bytes32 indexed refId,
         address indexed buyer,
         address indexed seller,
         address token,
@@ -60,11 +60,13 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
         uint256 deadline,
         uint256 disputeWindowHours
     );
-    event EscrowDelivered(bytes32 indexed escrowId, uint256 deliveredAt, bytes32 deliverableHash);
-    event EscrowDisputed(bytes32 indexed escrowId, address disputedBy);
-    event EscrowReleased(bytes32 indexed escrowId, uint256 sellerAmount, uint256 feeAmount);
-    event EscrowRefunded(bytes32 indexed escrowId, uint256 amount);
-    event EscrowSplitResolved(bytes32 indexed escrowId, uint256 sellerAmount, uint256 buyerAmount, uint256 feeAmount);
+    event EscrowDelivered(bytes32 indexed refId, uint256 deliveredAt, bytes32 deliverableHash);
+    event EscrowDisputed(bytes32 indexed refId, address disputedBy);
+    event EscrowReleased(bytes32 indexed refId, uint256 sellerAmount, uint256 feeAmount);
+    event EscrowRefunded(bytes32 indexed refId, uint256 amount);
+    event EscrowSplitResolved(bytes32 indexed refId, uint256 sellerAmount, uint256 buyerAmount, uint256 feeAmount);
+    event SellerAssigned(bytes32 indexed refId, address indexed seller);
+    event EscrowAdjusted(bytes32 indexed refId, uint256 oldAmount, uint256 newAmount);
     event OracleChangeInitiated(address indexed currentOracle, address indexed pendingOracle, uint256 effectiveTime);
     event OracleChangeCompleted(address indexed oldOracle, address indexed newOracle);
     event OracleChangeCancelled(address indexed cancelledOracle);
@@ -81,17 +83,17 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
         _;
     }
 
-    modifier onlyBuyerOrOracle(bytes32 escrowId) {
+    modifier onlyBuyerOrOracle(bytes32 refId) {
         require(
-            msg.sender == escrows[escrowId].buyer || msg.sender == oracle,
+            msg.sender == escrows[refId].buyer || msg.sender == oracle,
             "Only buyer or oracle"
         );
         _;
     }
 
-    modifier onlySellerOrOracle(bytes32 escrowId) {
+    modifier onlySellerOrOracle(bytes32 refId) {
         require(
-            msg.sender == escrows[escrowId].seller || msg.sender == oracle,
+            msg.sender == escrows[refId].seller || msg.sender == oracle,
             "Only seller or oracle"
         );
         _;
@@ -123,29 +125,31 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
     // ============ ESCROW FUNCTIONS ============
 
     /// @notice Create escrow — buyer locks funds in contract
-    /// @param escrowId Unique identifier (UUID converted to bytes32)
-    /// @param seller Worker/seller agent address
+    /// @param refId Unique reference identifier (e.g. jobId, taskId converted to bytes32)
+    /// @param seller Worker/seller agent address (address(0) allowed for deferred assignment)
     /// @param token ERC20 token address (USDC or USDT)
     /// @param amount Token amount (18 decimals on BSC)
     /// @param deadlineHours Hours until deadline (1-720)
     /// @param disputeWindowHours Hours for dispute window after delivery (1-168)
     function createEscrow(
-        bytes32 escrowId,
+        bytes32 refId,
         address seller,
         address token,
         uint256 amount,
         uint256 deadlineHours,
         uint256 disputeWindowHours
     ) external nonReentrant whenNotPaused {
-        require(escrows[escrowId].state == EscrowState.NONE, "Escrow exists");
-        require(seller != address(0), "Invalid seller");
-        require(seller != msg.sender, "Cannot escrow to self");
+        require(escrows[refId].state == EscrowState.NONE, "Escrow exists");
+        // seller=address(0) is allowed (deferred assignment via assignSeller)
+        if (seller != address(0)) {
+            require(seller != msg.sender, "Cannot escrow to self");
+        }
         require(amount > 0, "Amount must be > 0");
         require(allowedTokens[token], "Token not allowed");
         require(deadlineHours > 0 && deadlineHours <= 720, "Deadline 1-720 hours");
         require(disputeWindowHours > 0 && disputeWindowHours <= 168, "Dispute window 1-168 hours");
 
-        escrows[escrowId] = Escrow({
+        escrows[refId] = Escrow({
             buyer: msg.sender,
             seller: seller,
             token: token,
@@ -161,31 +165,97 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
 
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
 
-        emit EscrowCreated(escrowId, msg.sender, seller, token, amount, escrows[escrowId].deadline, disputeWindowHours);
+        emit EscrowCreated(refId, msg.sender, seller, token, amount, escrows[refId].deadline, disputeWindowHours);
+    }
+
+    /// @notice Cancel an unassigned escrow — buyer can reclaim funds immediately when no seller assigned
+    /// @param refId The escrow reference identifier
+    function cancelUnassigned(bytes32 refId) external nonReentrant whenNotPaused {
+        Escrow storage escrow = escrows[refId];
+        require(msg.sender == escrow.buyer, "Only buyer");
+        require(escrow.state == EscrowState.FUNDED, "Not funded");
+        require(escrow.seller == address(0), "Seller already assigned");
+
+        escrow.state = EscrowState.REFUNDED;
+
+        IERC20(escrow.token).safeTransfer(escrow.buyer, escrow.amount);
+
+        emit EscrowRefunded(refId, escrow.amount);
+    }
+
+    /// @notice Assign seller — oracle assigns a seller to an unassigned escrow
+    /// @param refId The escrow reference identifier
+    /// @param seller The seller/worker address to assign
+    function assignSeller(
+        bytes32 refId,
+        address seller
+    ) external whenNotPaused onlyOracle {
+        Escrow storage escrow = escrows[refId];
+        require(escrow.state == EscrowState.FUNDED, "Not funded");
+        require(escrow.seller == address(0), "Seller already assigned");
+        require(seller != address(0), "Invalid seller");
+        require(seller != escrow.buyer, "Seller cannot be buyer");
+
+        escrow.seller = seller;
+
+        emit SellerAssigned(refId, seller);
+    }
+
+    /// @notice Assign seller and adjust amount atomically — oracle assigns seller and optionally
+    ///         reduces escrow amount (refunding difference to buyer) in a single transaction
+    /// @param refId The escrow reference identifier
+    /// @param seller The seller/worker address to assign
+    /// @param newAmount The new escrow amount (must be > 0 and <= current amount)
+    function assignSellerAndAdjust(
+        bytes32 refId,
+        address seller,
+        uint256 newAmount
+    ) external nonReentrant whenNotPaused onlyOracle {
+        Escrow storage escrow = escrows[refId];
+        require(escrow.state == EscrowState.FUNDED, "Not funded");
+        require(escrow.seller == address(0), "Seller already assigned");
+        require(seller != address(0), "Invalid seller");
+        require(seller != escrow.buyer, "Seller cannot be buyer");
+        require(newAmount > 0, "Amount must be > 0");
+        require(newAmount <= escrow.amount, "Amount exceeds escrow");
+
+        // Adjust amount if needed (refund difference to buyer)
+        if (newAmount < escrow.amount) {
+            uint256 refundAmount = escrow.amount - newAmount;
+            uint256 oldAmount = escrow.amount;
+            escrow.amount = newAmount;
+            IERC20(escrow.token).safeTransfer(escrow.buyer, refundAmount);
+            emit EscrowAdjusted(refId, oldAmount, newAmount);
+        }
+
+        // Assign seller
+        escrow.seller = seller;
+        emit SellerAssigned(refId, seller);
     }
 
     /// @notice Mark as delivered — seller or oracle can call
-    /// @param escrowId The escrow identifier
+    /// @param refId The escrow reference identifier
     /// @param deliverableHash Hash of the delivered content for on-chain proof
     function markDelivered(
-        bytes32 escrowId,
+        bytes32 refId,
         bytes32 deliverableHash
-    ) external whenNotPaused onlySellerOrOracle(escrowId) {
-        Escrow storage escrow = escrows[escrowId];
+    ) external whenNotPaused onlySellerOrOracle(refId) {
+        Escrow storage escrow = escrows[refId];
         require(escrow.state == EscrowState.FUNDED, "Not funded");
+        require(escrow.seller != address(0), "No seller assigned");
         require(block.timestamp <= escrow.deadline, "Deadline passed");
 
         escrow.deliveredAt = block.timestamp;
         escrow.deliverableHash = deliverableHash;
         escrow.state = EscrowState.DELIVERED;
 
-        emit EscrowDelivered(escrowId, block.timestamp, deliverableHash);
+        emit EscrowDelivered(refId, block.timestamp, deliverableHash);
     }
 
     /// @notice Dispute — buyer can call within dispute window after delivery
-    /// @param escrowId The escrow identifier
-    function dispute(bytes32 escrowId) external whenNotPaused {
-        Escrow storage escrow = escrows[escrowId];
+    /// @param refId The escrow reference identifier
+    function dispute(bytes32 refId) external whenNotPaused {
+        Escrow storage escrow = escrows[refId];
         require(escrow.state == EscrowState.DELIVERED, "Not delivered");
         require(msg.sender == escrow.buyer, "Only buyer");
         require(!escrow.disputed, "Already disputed");
@@ -197,19 +267,20 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
         escrow.disputed = true;
         escrow.state = EscrowState.DISPUTED;
 
-        emit EscrowDisputed(escrowId, msg.sender);
+        emit EscrowDisputed(refId, msg.sender);
     }
 
     /// @notice Release — buyer or oracle (after dispute window)
     /// @dev Deducts platform fee and sends to RevenueManager
-    /// @param escrowId The escrow identifier
-    function release(bytes32 escrowId) external nonReentrant whenNotPaused onlyBuyerOrOracle(escrowId) {
-        Escrow storage escrow = escrows[escrowId];
+    /// @param refId The escrow reference identifier
+    function release(bytes32 refId) external nonReentrant whenNotPaused onlyBuyerOrOracle(refId) {
+        Escrow storage escrow = escrows[refId];
         require(
             escrow.state == EscrowState.FUNDED || escrow.state == EscrowState.DELIVERED,
             "Cannot release"
         );
         require(!escrow.disputed, "Disputed");
+        require(escrow.seller != address(0), "No seller assigned");
 
         // Oracle can only release after dispute window
         if (escrow.state == EscrowState.DELIVERED && msg.sender == oracle) {
@@ -229,13 +300,13 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
             IERC20(escrow.token).safeTransfer(revenueManager, fee);
         }
 
-        emit EscrowReleased(escrowId, sellerAmount, fee);
+        emit EscrowReleased(refId, sellerAmount, fee);
     }
 
     /// @notice Refund — buyer (after deadline if not delivered) or oracle anytime
-    /// @param escrowId The escrow identifier
-    function refund(bytes32 escrowId) external nonReentrant whenNotPaused onlyBuyerOrOracle(escrowId) {
-        Escrow storage escrow = escrows[escrowId];
+    /// @param refId The escrow reference identifier
+    function refund(bytes32 refId) external nonReentrant whenNotPaused onlyBuyerOrOracle(refId) {
+        Escrow storage escrow = escrows[refId];
         require(
             escrow.state == EscrowState.FUNDED ||
             escrow.state == EscrowState.DELIVERED ||
@@ -259,18 +330,19 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
 
         IERC20(escrow.token).safeTransfer(escrow.buyer, escrow.amount);
 
-        emit EscrowRefunded(escrowId, escrow.amount);
+        emit EscrowRefunded(refId, escrow.amount);
     }
 
     /// @notice Resolve dispute — oracle decides binary release or refund
-    /// @param escrowId The escrow identifier
+    /// @param refId The escrow reference identifier
     /// @param releaseToSeller true = release to seller, false = refund to buyer
     function resolveDispute(
-        bytes32 escrowId,
+        bytes32 refId,
         bool releaseToSeller
     ) external nonReentrant whenNotPaused onlyOracle {
-        Escrow storage escrow = escrows[escrowId];
+        Escrow storage escrow = escrows[refId];
         require(escrow.state == EscrowState.DISPUTED, "Not disputed");
+        require(escrow.seller != address(0), "No seller assigned");
 
         if (releaseToSeller) {
             escrow.state = EscrowState.RELEASED;
@@ -283,23 +355,24 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
                 IERC20(escrow.token).safeTransfer(revenueManager, fee);
             }
 
-            emit EscrowReleased(escrowId, sellerAmount, fee);
+            emit EscrowReleased(refId, sellerAmount, fee);
         } else {
             escrow.state = EscrowState.REFUNDED;
             IERC20(escrow.token).safeTransfer(escrow.buyer, escrow.amount);
-            emit EscrowRefunded(escrowId, escrow.amount);
+            emit EscrowRefunded(refId, escrow.amount);
         }
     }
 
     /// @notice Resolve dispute with split — oracle splits funds between buyer and seller
-    /// @param escrowId The escrow identifier
+    /// @param refId The escrow reference identifier
     /// @param sellerBps Basis points (0-10000) to allocate to seller
     function resolveDisputeSplit(
-        bytes32 escrowId,
+        bytes32 refId,
         uint256 sellerBps
     ) external nonReentrant whenNotPaused onlyOracle {
-        Escrow storage escrow = escrows[escrowId];
+        Escrow storage escrow = escrows[refId];
         require(escrow.state == EscrowState.DISPUTED, "Not disputed");
+        require(escrow.seller != address(0), "No seller assigned");
         require(sellerBps <= BASIS_POINTS, "Invalid split");
 
         escrow.state = EscrowState.RELEASED;
@@ -321,29 +394,29 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
             IERC20(escrow.token).safeTransfer(revenueManager, fee);
         }
 
-        emit EscrowSplitResolved(escrowId, sellerNet, buyerAmount, fee);
+        emit EscrowSplitResolved(refId, sellerNet, buyerAmount, fee);
     }
 
     // ============ VIEW FUNCTIONS ============
 
     /// @notice Check if auto-release is ready (used by oracle cron)
-    function isAutoReleaseReady(bytes32 escrowId) external view returns (bool) {
-        Escrow storage escrow = escrows[escrowId];
+    function isAutoReleaseReady(bytes32 refId) external view returns (bool) {
+        Escrow storage escrow = escrows[refId];
         if (escrow.state != EscrowState.DELIVERED) return false;
         if (escrow.disputed) return false;
         return block.timestamp > escrow.deliveredAt + (escrow.disputeWindowHours * 1 hours);
     }
 
     /// @notice Check if refund is ready (deadline passed, not delivered)
-    function isRefundReady(bytes32 escrowId) external view returns (bool) {
-        Escrow storage escrow = escrows[escrowId];
+    function isRefundReady(bytes32 refId) external view returns (bool) {
+        Escrow storage escrow = escrows[refId];
         if (escrow.state != EscrowState.FUNDED) return false;
         return block.timestamp > escrow.deadline;
     }
 
     /// @notice Get full escrow details
-    function getEscrow(bytes32 escrowId) external view returns (Escrow memory) {
-        return escrows[escrowId];
+    function getEscrow(bytes32 refId) external view returns (Escrow memory) {
+        return escrows[refId];
     }
 
     // ============ ADMIN FUNCTIONS ============
