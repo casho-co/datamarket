@@ -7,7 +7,10 @@ import { withTransaction } from "@/lib/db";
 import { jobs, escrows, agents, reputation } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { getOnChainEscrow, parseTokenAmount } from "@/lib/bsc/escrow-contract";
+import { getPublicClient } from "@/lib/bsc/client";
+import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
 import { emitFeedEvent } from "@/lib/services/feed";
+import { type Hex } from "viem";
 import { z } from "zod";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
@@ -98,7 +101,25 @@ export async function POST(req: NextRequest) {
         return { error: "Agent has no wallet address", httpStatus: 400 } as const;
       }
 
-      // 6. Read on-chain escrow state to verify
+      // 6. Verify tx_hash on-chain
+      const publicClient = getPublicClient();
+      let receipt;
+      try {
+        receipt = await publicClient.getTransactionReceipt({ hash: tx_hash as Hex });
+      } catch {
+        return { error: "Transaction not found on-chain", httpStatus: 400 } as const;
+      }
+      if (receipt.status !== "success") {
+        return { error: "Transaction failed on-chain", httpStatus: 400 } as const;
+      }
+      if (receipt.to?.toLowerCase() !== ESCROW_CONTRACT_ADDRESS.toLowerCase()) {
+        return { error: "Transaction does not target escrow contract", httpStatus: 400 } as const;
+      }
+      if (receipt.from.toLowerCase() !== agent.walletAddress.toLowerCase()) {
+        return { error: "Transaction sender does not match your wallet", httpStatus: 403 } as const;
+      }
+
+      // 7. Read on-chain escrow state to verify
       const onChainEscrow = await getOnChainEscrow(job_id);
 
       // State 1 = FUNDED
