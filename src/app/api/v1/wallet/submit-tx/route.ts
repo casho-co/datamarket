@@ -3,10 +3,10 @@ import { requireScope } from "@/lib/auth/middleware";
 import { checkRateLimit } from "@/lib/middleware/rate-limit";
 import { getNonce, validateNonce } from "@/lib/middleware/nonce";
 import { logAudit, getClientIp } from "@/lib/services/audit";
-import { db } from "@/lib/db";
+import { withTransaction } from "@/lib/db";
 import { jobs, escrows, agents, reputation } from "@/lib/db/schema";
-import { eq, and, sql } from "drizzle-orm";
-import { getOnChainEscrow, uuidToBytes32, parseTokenAmount } from "@/lib/bsc/escrow-contract";
+import { eq, sql } from "drizzle-orm";
+import { getOnChainEscrow, parseTokenAmount } from "@/lib/bsc/escrow-contract";
 import { emitFeedEvent } from "@/lib/services/feed";
 import { z } from "zod";
 
@@ -57,121 +57,136 @@ export async function POST(req: NextRequest) {
   });
 
   try {
-    // Idempotent: atomically set verified=true only if currently false
-    const [updatedJob] = await db
-      .update(jobs)
-      .set({ verified: true, updatedAt: new Date() })
-      .where(and(eq(jobs.id, job_id), eq(jobs.verified, false)))
-      .returning();
+    const result = await withTransaction(async (tx) => {
+      // 1. Lock the job row — prevents concurrent submit-tx calls
+      const [job] = await tx
+        .select()
+        .from(jobs)
+        .where(eq(jobs.id, job_id))
+        .for("update");
 
-    if (!updatedJob) {
-      // Already verified — check if this is a safe idempotent retry
-      const [existingJob] = await db.select().from(jobs).where(eq(jobs.id, job_id));
-      if (!existingJob) {
-        return NextResponse.json({ error: "Job not found" }, { status: 404 });
+      if (!job) {
+        return { error: "Job not found", httpStatus: 404 } as const;
       }
-      if (existingJob.verified) {
-        return NextResponse.json({
-          job_id,
-          status: "verified",
-          message: "Job already verified",
-        });
+
+      // 2. Idempotent: already verified → return success
+      if (job.verified) {
+        return { job_id, status: "verified", message: "Job already verified" } as const;
       }
-      return NextResponse.json({ error: "Job not found" }, { status: 404 });
-    }
 
-    // Verify the caller is the job creator
-    if (updatedJob.creatorAgentId !== auth.agentId) {
-      // Rollback: revert verified flag
-      await db.update(jobs).set({ verified: false }).where(eq(jobs.id, job_id));
-      return NextResponse.json({ error: "Not job creator" }, { status: 403 });
-    }
+      // 3. Verify the caller is the job creator
+      if (job.creatorAgentId !== auth.agentId) {
+        return { error: "Not job creator", httpStatus: 403 } as const;
+      }
 
-    // Dedup: ensure no escrow already exists with this tx hash
-    const [existingEscrow] = await db
-      .select({ id: escrows.id })
-      .from(escrows)
-      .where(eq(escrows.onChainTxHash, tx_hash));
-    if (existingEscrow) {
-      return NextResponse.json({ error: "Transaction already used for another escrow" }, { status: 409 });
-    }
+      // 4. Dedup: ensure no escrow already exists with this tx hash
+      const [existingEscrow] = await tx
+        .select({ id: escrows.id })
+        .from(escrows)
+        .where(eq(escrows.onChainTxHash, tx_hash));
+      if (existingEscrow) {
+        return { error: "Transaction already used for another escrow", httpStatus: 409 } as const;
+      }
 
-    // Read on-chain escrow state to verify
-    const refIdBytes32 = uuidToBytes32(job_id);
-    const onChainEscrow = await getOnChainEscrow(job_id);
+      // 5. Fetch agent wallet address
+      const [agent] = await tx
+        .select({ walletAddress: agents.walletAddress })
+        .from(agents)
+        .where(eq(agents.id, auth.agentId));
 
-    // Verify on-chain state
-    // State 1 = FUNDED
-    if (onChainEscrow.state !== 1) {
-      await db.update(jobs).set({ verified: false }).where(eq(jobs.id, job_id));
-      return NextResponse.json({ error: "On-chain escrow not in FUNDED state" }, { status: 400 });
-    }
+      if (!agent?.walletAddress) {
+        return { error: "Agent has no wallet address", httpStatus: 400 } as const;
+      }
 
-    // Verify buyer matches agent's wallet
-    const [agent] = await db
-      .select({ walletAddress: agents.walletAddress })
-      .from(agents)
-      .where(eq(agents.id, auth.agentId));
+      // 6. Read on-chain escrow state to verify
+      const onChainEscrow = await getOnChainEscrow(job_id);
 
-    if (!agent?.walletAddress || onChainEscrow.buyer.toLowerCase() !== agent.walletAddress.toLowerCase()) {
-      await db.update(jobs).set({ verified: false }).where(eq(jobs.id, job_id));
-      return NextResponse.json({ error: "On-chain buyer does not match your wallet" }, { status: 403 });
-    }
+      // State 1 = FUNDED
+      if (onChainEscrow.state !== 1) {
+        return { error: "On-chain escrow not in FUNDED state", httpStatus: 400 } as const;
+      }
 
-    // Verify amount matches budget (exact match in wei)
-    if (!updatedJob.budgetAmount) {
-      await db.update(jobs).set({ verified: false }).where(eq(jobs.id, job_id));
-      return NextResponse.json({ error: "Job has no budget set" }, { status: 400 });
-    }
-    const expectedWei = parseTokenAmount(updatedJob.budgetAmount, "USDC");
-    if (onChainEscrow.amount !== expectedWei) {
-      await db.update(jobs).set({ verified: false }).where(eq(jobs.id, job_id));
-      return NextResponse.json({ error: "On-chain amount does not match job budget" }, { status: 400 });
-    }
+      // Verify buyer matches agent's wallet
+      if (onChainEscrow.buyer.toLowerCase() !== agent.walletAddress.toLowerCase()) {
+        return { error: "On-chain buyer does not match your wallet", httpStatus: 403 } as const;
+      }
 
-    // Verify seller is address(0) — not yet assigned
-    if (onChainEscrow.seller.toLowerCase() !== ZERO_ADDRESS) {
-      await db.update(jobs).set({ verified: false }).where(eq(jobs.id, job_id));
-      return NextResponse.json({ error: "On-chain escrow already has a seller assigned" }, { status: 400 });
-    }
+      // Verify amount matches budget (exact match in wei)
+      if (!job.budgetAmount) {
+        return { error: "Job has no budget set", httpStatus: 400 } as const;
+      }
+      const expectedWei = parseTokenAmount(job.budgetAmount, "USDC");
+      if (onChainEscrow.amount !== expectedWei) {
+        return { error: "On-chain amount does not match job budget", httpStatus: 400 } as const;
+      }
 
-    // All checks pass — create escrow DB row
-    await db.insert(escrows).values({
-      refId: job_id,
-      refType: "job",
-      funderAgentId: auth.agentId,
-      recipientAgentId: null,
-      amount: updatedJob.budgetAmount,
-      status: "funded",
-      onChainTxHash: tx_hash,
+      // Verify seller is address(0) — not yet assigned
+      if (onChainEscrow.seller.toLowerCase() !== ZERO_ADDRESS) {
+        return { error: "On-chain escrow already has a seller assigned", httpStatus: 400 } as const;
+      }
+
+      // 7. All checks pass — create escrow DB row
+      await tx.insert(escrows).values({
+        refId: job_id,
+        refType: "job",
+        funderAgentId: auth.agentId,
+        recipientAgentId: null,
+        amount: job.budgetAmount,
+        status: "funded",
+        onChainTxHash: tx_hash,
+      });
+
+      // 8. NOW set verified=true — only after all checks pass
+      await tx
+        .update(jobs)
+        .set({ verified: true, updatedAt: new Date() })
+        .where(eq(jobs.id, job_id));
+
+      // 9. Update reputation stats
+      await tx
+        .update(reputation)
+        .set({
+          jobsPosted: sql`${reputation.jobsPosted} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(reputation.agentId, auth.agentId));
+
+      return {
+        job_id,
+        status: "verified" as const,
+        message: "Job is now live",
+        _emitFeed: true,
+        _jobTitle: job.title,
+        _budgetAmount: job.budgetAmount,
+        _jobType: job.jobType,
+      };
     });
 
-    // Update reputation stats (deferred from createJob)
-    await db
-      .update(reputation)
-      .set({
-        jobsPosted: sql`${reputation.jobsPosted} + 1`,
-        updatedAt: new Date(),
-      })
-      .where(eq(reputation.agentId, auth.agentId));
+    // Handle error responses from within the transaction
+    if ("error" in result) {
+      return NextResponse.json(
+        { error: result.error },
+        { status: result.httpStatus }
+      );
+    }
 
-    // Emit deferred feed event
-    await emitFeedEvent("job_created", job_id, {
-      job_id,
-      title: updatedJob.title,
-      creator_agent_id: auth.agentId,
-      budget_amount: updatedJob.budgetAmount,
-      job_type: updatedJob.jobType,
-    });
+    // Emit feed event outside the transaction (non-critical)
+    if ("_emitFeed" in result && result._emitFeed) {
+      await emitFeedEvent("job_created", job_id, {
+        job_id,
+        title: result._jobTitle,
+        creator_agent_id: auth.agentId,
+        budget_amount: result._budgetAmount,
+        job_type: result._jobType,
+      });
+    }
 
     return NextResponse.json({
-      job_id,
-      status: "verified",
-      message: "Job is now live",
+      job_id: result.job_id,
+      status: result.status,
+      message: result.message,
     });
   } catch (err) {
-    // On failure, revert verified flag
-    await db.update(jobs).set({ verified: false }).where(eq(jobs.id, job_id)).catch(() => {});
     return NextResponse.json(
       { error: err instanceof Error ? err.message : "Verification failed" },
       { status: 500 }
