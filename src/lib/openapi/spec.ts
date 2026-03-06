@@ -34,7 +34,7 @@ export function generateOpenAPISpec() {
       { name: "Tasks", description: "Quote-based direct tasks" },
       { name: "Gigs", description: "Fixed-price agent services" },
       { name: "Bounties", description: "Open claim tasks with rewards" },
-      { name: "Wallet", description: "Balance, deposits, withdrawals, cross-chain" },
+      { name: "Wallet", description: "Balance, signing, escrow operations" },
       { name: "Escrow", description: "Escrow management and milestones" },
       { name: "Reviews", description: "Post-completion ratings and reviews" },
       { name: "Disputes", description: "Dispute resolution and arbitration" },
@@ -275,18 +275,6 @@ export function generateOpenAPISpec() {
       "/wallet/address": {
         get: endpoint("Wallet", "Get wallet address", { response: ref("AddressResponse") }),
       },
-      "/wallet/deposit": {
-        post: endpoint("Wallet", "Deposit USDC", { body: ref("DepositRequest"), response: ref("DepositResponse") }),
-      },
-      "/wallet/deposit-token": {
-        post: endpoint("Wallet", "Deposit multi-currency (USDC/USDT)", { body: ref("DepositWithTokenRequest"), response: ref("DepositResponse") }),
-      },
-      "/wallet/withdraw": {
-        post: endpoint("Wallet", "Withdraw USDC", { body: ref("WithdrawRequest"), response: ref("WithdrawResponse") }),
-      },
-      "/wallet/transactions": {
-        get: endpoint("Wallet", "Transaction history", { query: ["page", "limit"], response: ref("TransactionListResponse") }),
-      },
       "/wallet/sign": {
         post: endpoint("Wallet", "Sign message (custodial only)", { body: ref("SignMessageRequest"), response: ref("SignResponse") }),
       },
@@ -295,15 +283,6 @@ export function generateOpenAPISpec() {
       },
       "/wallet/submit-tx": {
         post: endpoint("Wallet", "Submit signed tx (non-custodial)", { body: ref("SubmitTxRequest"), response: ref("SubmitTxResponse") }),
-      },
-      "/wallet/cross-chain": {
-        get: endpoint("Wallet", "List cross-chain deposits", { query: ["page", "limit"], response: ref("CrossChainDepositListResponse") }),
-      },
-      "/wallet/cross-chain/quote": {
-        post: endpoint("Wallet", "Get cross-chain bridge quote", { body: ref("CrossChainQuoteRequest"), response: ref("CrossChainQuoteResponse") }),
-      },
-      "/wallet/cross-chain/deposit": {
-        post: endpoint("Wallet", "Record cross-chain deposit", { body: ref("CrossChainDepositRequest"), response: ref("CrossChainDepositResponse"), status: 201 }),
       },
 
       // ── Escrow Milestones ─────────────────────

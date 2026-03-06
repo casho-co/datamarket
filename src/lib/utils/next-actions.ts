@@ -7,7 +7,6 @@ export interface NextAction {
 
 type FlowStage =
   | "registered"
-  | "deposited"
   | "job_created"
   | "bid_placed"
   | "job_awarded"
@@ -15,7 +14,6 @@ type FlowStage =
   | "work_accepted"
   | "dispute_opened"
   | "dispute_ruled"
-  | "withdrawn"
   | "balance_check"
   | "task_created"
   | "task_quoted"
@@ -36,16 +34,10 @@ type FlowStage =
 
 const ACTION_MAP: Record<FlowStage, NextAction[]> = {
   registered: [
-    { action: "deposit", method: "POST", path: "/api/v1/wallet/deposit", description: "Deposit USDC to start using the marketplace" },
+    { action: "check_balance", method: "GET", path: "/api/v1/wallet/balance", description: "Check your on-chain USDC balance" },
     { action: "browse_jobs", method: "GET", path: "/api/v1/jobs?status=open", description: "Browse available jobs" },
     { action: "browse_gigs", method: "GET", path: "/api/v1/gigs", description: "Browse available gig services" },
     { action: "browse_bounties", method: "GET", path: "/api/v1/bounties?status=open", description: "Browse open bounties" },
-  ],
-  deposited: [
-    { action: "check_balance", method: "GET", path: "/api/v1/wallet/balance", description: "Check your wallet balance" },
-    { action: "create_job", method: "POST", path: "/api/v1/jobs", description: "Post a new job" },
-    { action: "create_gig", method: "POST", path: "/api/v1/gigs", description: "Create a gig listing" },
-    { action: "create_bounty", method: "POST", path: "/api/v1/bounties", description: "Post a bounty" },
   ],
   job_created: [
     { action: "view_bids", method: "GET", path: "/api/v1/jobs/{job_id}/bids", description: "View bids on your job" },
@@ -68,7 +60,6 @@ const ACTION_MAP: Record<FlowStage, NextAction[]> = {
   work_accepted: [
     { action: "leave_review", method: "POST", path: "/api/v1/reviews", description: "Leave a review for the agent" },
     { action: "check_balance", method: "GET", path: "/api/v1/wallet/balance", description: "Check your updated balance" },
-    { action: "withdraw", method: "POST", path: "/api/v1/wallet/withdraw", description: "Withdraw earned USDC to your wallet" },
   ],
   dispute_opened: [
     { action: "submit_evidence", method: "POST", path: "/api/v1/disputes/{dispute_id}/evidence", description: "Submit evidence for the dispute" },
@@ -78,13 +69,7 @@ const ACTION_MAP: Record<FlowStage, NextAction[]> = {
     { action: "check_balance", method: "GET", path: "/api/v1/wallet/balance", description: "Check your balance after dispute resolution" },
     { action: "browse_jobs", method: "GET", path: "/api/v1/jobs?status=open", description: "Continue using the marketplace" },
   ],
-  withdrawn: [
-    { action: "check_balance", method: "GET", path: "/api/v1/wallet/balance", description: "Check your remaining balance" },
-    { action: "browse_jobs", method: "GET", path: "/api/v1/jobs?status=open", description: "Browse available jobs" },
-  ],
   balance_check: [
-    { action: "deposit", method: "POST", path: "/api/v1/wallet/deposit", description: "Deposit more USDC" },
-    { action: "withdraw", method: "POST", path: "/api/v1/wallet/withdraw", description: "Withdraw USDC to your wallet" },
     { action: "browse_jobs", method: "GET", path: "/api/v1/jobs?status=open", description: "Browse available jobs" },
     { action: "create_job", method: "POST", path: "/api/v1/jobs", description: "Post a new job" },
   ],

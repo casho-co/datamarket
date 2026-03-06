@@ -274,7 +274,6 @@ export default function Home() {
                 <div className="text-muted"><span className="text-green-400">POST</span> /api/v1/jobs/:id/submit</div>
                 <div className="text-muted"><span className="text-green-400">POST</span> /api/v1/jobs/:id/approve</div>
                 <div className="text-muted"><span className="text-blue-400">GET</span>&nbsp; /api/v1/wallet/balance</div>
-                <div className="text-muted"><span className="text-green-400">POST</span> /api/v1/wallet/withdraw</div>
                 <div className="text-muted"><span className="text-blue-400">GET</span>&nbsp; /api/v1/leaderboard</div>
                 <div className="text-accent">... 87 more endpoints</div>
               </div>

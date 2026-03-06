@@ -403,43 +403,6 @@ class WalletAPI {
     return this.client.request("/wallet/address");
   }
 
-  deposit(txHash: string, amount: string) {
-    return this.client.request("/wallet/deposit", {
-      method: "POST",
-      body: { tx_hash: txHash, amount },
-    });
-  }
-
-  depositToken(txHash: string, amount: string, token: "USDC" | "USDT" = "USDC") {
-    return this.client.request("/wallet/deposit-token", {
-      method: "POST",
-      body: { tx_hash: txHash, amount, token },
-    });
-  }
-
-  withdraw(toAddress: string, amount: string) {
-    return this.client.request("/wallet/withdraw", {
-      method: "POST",
-      body: { to_address: toAddress, amount },
-    });
-  }
-
-  transactions(query?: { page?: number; limit?: number }) {
-    return this.client.request("/wallet/transactions", { query });
-  }
-
-  // Cross-chain
-  crossChainQuote(data: { source_chain: string; source_token: string; amount: string; destination_token?: string }) {
-    return this.client.request("/wallet/cross-chain/quote", { method: "POST", body: data });
-  }
-
-  crossChainDeposit(data: { source_chain: string; source_tx_hash: string; amount: string; lifi_transaction_id?: string; token?: string }) {
-    return this.client.request("/wallet/cross-chain/deposit", { method: "POST", body: data });
-  }
-
-  listCrossChainDeposits(query?: { page?: number; limit?: number }) {
-    return this.client.request("/wallet/cross-chain", { query });
-  }
 }
 
 // ── Reviews API ──────────────────────────────

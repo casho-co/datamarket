@@ -83,11 +83,6 @@ export const evidenceTypeEnum = pgEnum("evidence_type", [
   "hash",
 ]);
 
-export const txStatusEnum = pgEnum("tx_status", [
-  "pending",
-  "confirmed",
-  "failed",
-]);
 
 export const taskStatusEnum = pgEnum("task_status", [
   "requested",
@@ -137,12 +132,6 @@ export const webhookDeliveryStatusEnum = pgEnum("webhook_delivery_status", [
   "failed",
 ]);
 
-export const crossChainStatusEnum = pgEnum("cross_chain_status", [
-  "pending",
-  "bridging",
-  "confirmed",
-  "failed",
-]);
 
 export const deliverableTypeEnum = pgEnum("deliverable_type", [
   "url",
@@ -151,14 +140,6 @@ export const deliverableTypeEnum = pgEnum("deliverable_type", [
   "hash_only",
 ]);
 
-export const sourceChainEnum = pgEnum("source_chain", [
-  "bsc",
-  "ethereum",
-  "arbitrum",
-  "solana",
-  "base",
-  "polygon",
-]);
 
 // ═══════════════════════════════════════════════
 // 1. Agents
@@ -832,50 +813,6 @@ export const reputationSkills = pgTable(
   ]
 );
 
-// ═══════════════════════════════════════════════
-// 21. Deposits
-// ═══════════════════════════════════════════════
-
-export const deposits = pgTable(
-  "deposits",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    agentId: uuid("agent_id")
-      .references(() => agents.id)
-      .notNull(),
-    amount: varchar("amount", { length: 50 }).notNull(),
-    txHash: varchar("tx_hash", { length: 66 }).unique(),
-    sourceChain: sourceChainEnum("source_chain").default("bsc").notNull(),
-    bridgeTxHash: varchar("bridge_tx_hash", { length: 66 }),
-    status: txStatusEnum("status").default("pending").notNull(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    confirmedAt: timestamp("confirmed_at"),
-  },
-  (table) => [
-    index("idx_deposits_agent").on(table.agentId),
-    index("idx_deposits_status").on(table.status),
-  ]
-);
-
-// ═══════════════════════════════════════════════
-// 22. Withdrawals
-// ═══════════════════════════════════════════════
-
-export const withdrawals = pgTable(
-  "withdrawals",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    agentId: uuid("agent_id")
-      .references(() => agents.id)
-      .notNull(),
-    toAddress: varchar("to_address", { length: 42 }).notNull(),
-    amount: varchar("amount", { length: 50 }).notNull(),
-    txHash: varchar("tx_hash", { length: 66 }),
-    status: txStatusEnum("status").default("pending").notNull(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-  },
-  (table) => [index("idx_withdrawals_agent").on(table.agentId)]
-);
 
 // ═══════════════════════════════════════════════
 // 23. File Uploads
@@ -1015,31 +952,6 @@ export const submissionHistory = pgTable(
   ]
 );
 
-// ═══════════════════════════════════════════════
-// Cross-Chain Deposits (P2 - prepared)
-// ═══════════════════════════════════════════════
-
-export const crossChainDeposits = pgTable(
-  "cross_chain_deposits",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    agentId: uuid("agent_id")
-      .references(() => agents.id)
-      .notNull(),
-    sourceChain: sourceChainEnum("source_chain").notNull(),
-    sourceTxHash: varchar("source_tx_hash", { length: 66 }).notNull(),
-    bridgeTxHash: varchar("bridge_tx_hash", { length: 66 }),
-    bscTxHash: varchar("bsc_tx_hash", { length: 66 }),
-    amount: varchar("amount", { length: 50 }).notNull(),
-    status: crossChainStatusEnum("status").default("pending").notNull(),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    confirmedAt: timestamp("confirmed_at"),
-  },
-  (table) => [
-    index("idx_cc_deposits_agent").on(table.agentId),
-    index("idx_cc_deposits_status").on(table.status),
-  ]
-);
 
 // ═══════════════════════════════════════════════
 // 29. Favorite Agents
@@ -1176,40 +1088,6 @@ export const agentDelegations = pgTable(
   ]
 );
 
-// ═══════════════════════════════════════════════
-// 34. LiFi Bridge Transactions
-// ═══════════════════════════════════════════════
-
-export const lifiBridgeTransactions = pgTable(
-  "lifi_bridge_transactions",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    agentId: uuid("agent_id")
-      .references(() => agents.id, { onDelete: "cascade" })
-      .notNull(),
-    crossChainDepositId: uuid("cross_chain_deposit_id")
-      .references(() => crossChainDeposits.id),
-    lifiTransactionId: varchar("lifi_transaction_id", { length: 255 }),
-    sourceChain: sourceChainEnum("source_chain").notNull(),
-    sourceToken: varchar("source_token", { length: 42 }).notNull(),
-    sourceAmount: varchar("source_amount", { length: 50 }).notNull(),
-    destinationChain: sourceChainEnum("destination_chain").default("bsc").notNull(),
-    destinationToken: varchar("destination_token", { length: 42 }).notNull(),
-    destinationAmount: varchar("destination_amount", { length: 50 }),
-    sourceTxHash: varchar("source_tx_hash", { length: 66 }),
-    destinationTxHash: varchar("destination_tx_hash", { length: 66 }),
-    status: varchar("status", { length: 20 })
-      .default("pending")
-      .notNull(),
-    quoteData: jsonb("quote_data"),
-    createdAt: timestamp("created_at").defaultNow().notNull(),
-    completedAt: timestamp("completed_at"),
-  },
-  (table) => [
-    index("idx_lifi_agent").on(table.agentId),
-    index("idx_lifi_status").on(table.status),
-  ]
-);
 
 // ═══════════════════════════════════════════════
 // 35. Token Launches (Four.meme)
@@ -1289,13 +1167,10 @@ export type DisputePanelVote = typeof disputePanelVotes.$inferSelect;
 export type CompetitionEntry = typeof competitionEntries.$inferSelect;
 export type Reputation = typeof reputation.$inferSelect;
 export type ReputationSkill = typeof reputationSkills.$inferSelect;
-export type Deposit = typeof deposits.$inferSelect;
-export type Withdrawal = typeof withdrawals.$inferSelect;
 export type FeedEvent = typeof feedEvents.$inferSelect;
 export type FileUpload = typeof fileUploads.$inferSelect;
 export type AuditLog = typeof auditLogs.$inferSelect;
 export type WebhookDelivery = typeof webhookDeliveries.$inferSelect;
-export type CrossChainDeposit = typeof crossChainDeposits.$inferSelect;
 export type SubmissionHistory = typeof submissionHistory.$inferSelect;
 export type FavoriteAgent = typeof favoriteAgents.$inferSelect;
 export type JobTemplate = typeof jobTemplates.$inferSelect;
@@ -1303,7 +1178,6 @@ export type NewJobTemplate = typeof jobTemplates.$inferInsert;
 export type ApiUsageMetric = typeof apiUsageMetrics.$inferSelect;
 export type EscrowMilestone = typeof escrowMilestones.$inferSelect;
 export type AgentDelegation = typeof agentDelegations.$inferSelect;
-export type LifiBridgeTransaction = typeof lifiBridgeTransactions.$inferSelect;
 export type Conversation = typeof conversations.$inferSelect;
 export type TokenLaunch = typeof tokenLaunches.$inferSelect;
 export type NewTokenLaunch = typeof tokenLaunches.$inferInsert;

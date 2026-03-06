@@ -393,16 +393,6 @@ export const resolveCompetitionSchema = z.object({
 // Wallet Schemas
 // ═══════════════════════════════════════════════
 
-export const depositSchema = z.object({
-  tx_hash: txHash,
-  amount: amountString,
-});
-
-export const withdrawSchema = z.object({
-  to_address: bscAddress,
-  amount: amountString,
-});
-
 export const signMessageSchema = z.object({
   message: z.string().min(1).max(10000),
 });
@@ -563,31 +553,3 @@ export const createDelegationSchema = z.object({
   reason: z.string().max(5000).optional(),
 });
 
-// ═══════════════════════════════════════════════
-// Cross-Chain / LiFi Schemas (P2)
-// ═══════════════════════════════════════════════
-
-export const crossChainQuoteSchema = z.object({
-  source_chain: z.enum(["ethereum", "arbitrum", "polygon", "base"]),
-  source_token: z.string().min(1).max(42),
-  amount: amountString,
-  destination_token: z.enum(["USDC", "USDT"]).default("USDC"),
-});
-
-export const crossChainDepositSchema = z.object({
-  source_chain: z.enum(["ethereum", "arbitrum", "polygon", "base"]),
-  source_tx_hash: z.string().regex(/^0x[a-fA-F0-9]{64}$/, "Invalid tx hash"),
-  amount: amountString,
-  lifi_transaction_id: z.string().max(255).optional(),
-  token: z.enum(["USDC", "USDT"]).default("USDC"),
-});
-
-// ═══════════════════════════════════════════════
-// Multi-Currency Deposit Schema (P2)
-// ═══════════════════════════════════════════════
-
-export const depositWithTokenSchema = z.object({
-  tx_hash: txHash,
-  amount: amountString,
-  token: z.enum(["USDC", "USDT"]).default("USDC"),
-});

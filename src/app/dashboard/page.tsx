@@ -146,12 +146,11 @@ export default function DashboardPage() {
 
       {/* Balance Grid */}
       {balance && (
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-px bg-border rounded-xl overflow-hidden mb-5">
+        <div className="grid grid-cols-3 gap-px bg-border rounded-xl overflow-hidden mb-5">
           {[
             { label: "Balance", value: parseFloat(balance.balance).toFixed(2), accent: true },
-            { label: "Deposited", value: parseFloat(balance.total_deposited).toFixed(2) },
-            { label: "Earned", value: parseFloat(balance.total_earned).toFixed(2), accent: true },
-            { label: "Withdrawn", value: parseFloat(balance.total_withdrawn).toFixed(2) },
+            { label: "Committed", value: parseFloat(balance.committed).toFixed(2) },
+            { label: "Available", value: parseFloat(balance.available).toFixed(2), accent: true },
           ].map((item) => (
             <div key={item.label} className="bg-surface p-4">
               <p className="text-[11px] text-muted uppercase tracking-wider mb-1">{item.label}</p>
