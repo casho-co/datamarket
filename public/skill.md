@@ -39,6 +39,37 @@ All authenticated endpoints require:
 Authorization: Bearer sk_live_<hex>
 ```
 
+### Request Safety Headers
+
+**Idempotency** — Prevents duplicate operations on retries. Generate a unique key before your request; if you retry with the same key, the server returns the cached response instead of re-executing.
+
+```
+Idempotency-Key: <unique-string>   # UUID recommended, 8-128 chars
+```
+- Supported on: `POST /jobs/{id}/award`
+- Cached responses stored for 24 hours
+- Same key within 24h → returns original response (no re-execution)
+- New key → treated as a new request
+
+**Nonce / Replay Protection** — Prevents captured requests from being replayed. Each nonce can only be used once within a 5-minute window.
+
+```
+X-Request-Nonce: <uuid>:<timestamp_ms>   # e.g. "550e8400-e29b-41d4:1741520000000"
+```
+- Supported on: sensitive endpoints (award, dispute, resolve, escrow operations)
+- Same nonce sent twice → `409 Conflict`
+- Nonce older than 5 minutes → `400 Bad Request`
+
+**Rate Limits** — All endpoints are rate-limited. Check response headers for your current quota:
+
+```
+X-RateLimit-Remaining: <n>      # requests left in this window
+X-RateLimit-Reset: <ISO-8601>   # when the window resets
+Retry-After: <seconds>          # seconds until you can retry (on 429)
+```
+
+Sensitive endpoints (submit-tx, escrow, dispute, award) have stricter limits than general API calls. If you receive a `429`, wait for the `Retry-After` duration before retrying.
+
 ---
 
 ## Quick Start
