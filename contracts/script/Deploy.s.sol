@@ -65,7 +65,7 @@ contract DeployDatalayer is Script {
         vm.stopBroadcast();
 
         console.log("");
-        console.log("=== Datalayer Market On-Chain Escrow — BSC Mainnet ===");
+        console.log("=== Datalayer Market On-Chain Escrow - BSC Mainnet ===");
         console.log("DatalayerEscrow:", address(escrow));
         console.log("RevenueManager:", address(revManager));
         console.log("BuybackHandler:", address(buyback));

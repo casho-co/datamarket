@@ -212,7 +212,7 @@ export async function cancelJob(jobId: string, agentId: string) {
 
     if (escrow && escrow.onChainTxHash) {
       const { oracleRefund } = await import("@/lib/bsc/escrow-contract");
-      const refundTxHash = await oracleRefund(escrow.id);
+      const refundTxHash = await oracleRefund(jobId);
       await db
         .update(escrows)
         .set({ status: "refunded", refundedAt: new Date(), releaseTxHash: refundTxHash })

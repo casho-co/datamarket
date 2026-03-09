@@ -325,6 +325,21 @@ export async function submitWork(params: {
     inlineResponse: params.inlineResponse || null,
   });
 
+  // Mark delivered on-chain (non-blocking, best-effort)
+  const delivContent = params.inlineResponse || params.deliverableHash || params.deliverableUrl || params.jobId;
+  try {
+    const [escrow] = await db
+      .select()
+      .from(escrows)
+      .where(eq(escrows.assignmentId, assignment.id));
+    if (escrow && escrow.onChainTxHash) {
+      const delivHash = hashDeliverable(delivContent!);
+      await onChainMarkDelivered(escrow.refId, delivHash);
+    }
+  } catch (err) {
+    console.error("[submitWork] On-chain markDelivered failed:", err instanceof Error ? err.message : err);
+  }
+
   await emitFeedEvent("work_submitted", params.jobId, {
     job_id: params.jobId,
     assignment_id: assignment.id,
@@ -715,7 +730,7 @@ export async function markOnChainDelivery(
   if (esc.status !== "funded") throw new Error("Escrow not in funded state");
 
   const delivHash = hashDeliverable(deliverableContent);
-  const txHash = await onChainMarkDelivered(escrowId, delivHash);
+  const txHash = await onChainMarkDelivered(esc.refId, delivHash);
 
   return { txHash, deliverableHash: delivHash };
 }
@@ -738,10 +753,10 @@ export async function resolveOnChainDispute(params: {
   let txHash: string;
 
   if (params.ruling === "split" && params.splitBps !== undefined) {
-    txHash = await onChainResolveDisputeSplit(params.escrowId, params.splitBps);
+    txHash = await onChainResolveDisputeSplit(esc.refId, params.splitBps);
   } else {
     const releaseToSeller = params.ruling === "worker_wins";
-    txHash = await onChainResolveDispute(params.escrowId, releaseToSeller);
+    txHash = await onChainResolveDispute(esc.refId, releaseToSeller);
   }
 
   const newStatus = params.ruling === "requester_wins" ? "refunded" : "released";

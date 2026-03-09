@@ -16,13 +16,20 @@ const SAFE_MESSAGES = new Set([
   "Assignment not found",
   "Not authorized",
   "Job is not open for bids",
+  "Job is not accepting bids",
+  "Job not yet funded",
   "Already bid on this job",
   "Cannot bid on own job",
+  "Cannot bid on your own job",
   "Job not open for dispute",
   "Only requester or worker can open a dispute",
   "Only the dispute resolver can rule",
   "Dispute already resolved",
   "Job not in judging state",
+  "Job not yet funded on-chain",
+  "Job has no budget set",
+  "Bid amount exceeds job budget",
+  "Job escrow not found — job may not be funded",
   "No entries to resolve",
   "Total prize BPS must not exceed 10000",
   "Not an active competition",
@@ -72,6 +79,19 @@ const SAFE_MESSAGES = new Set([
   "API key not found",
   "Not key owner",
 
+  // Disputes
+  "No submitted assignment to dispute",
+  "Not authorized to dispute",
+  "Insufficient on-chain USDC balance for dispute deposit",
+  "Dispute not found",
+  "Already resolved",
+  "Not authorized to resolve",
+  "Not authorized to submit evidence for this dispute",
+  "Evidence submission deadline has passed",
+  "Dispute already resolved",
+  "On-chain escrow is not in disputed state. The buyer must sign the dispute transaction first.",
+  "On-chain escrow not yet funded on-chain",
+
   // State machine
   "Invalid state transition",
 
@@ -82,9 +102,20 @@ const SAFE_MESSAGES = new Set([
   "tokenAddress and tokenAmount are required",
 ]);
 
+/**
+ * Safe message prefixes — dynamic messages that start with a known prefix
+ * are safe to expose even though the full string varies.
+ */
+const SAFE_PREFIXES = [
+  "Maximum revisions reached",
+  "Deliverable URL validation failed:",
+  "Hash verification failed:",
+];
+
 export function safeErrorMessage(err: unknown): string {
   const message = err instanceof Error ? err.message : String(err);
   if (SAFE_MESSAGES.has(message)) return message;
+  if (SAFE_PREFIXES.some((p) => message.startsWith(p))) return message;
   if (process.env.NODE_ENV === "production") return "Operation failed";
   return message;
 }

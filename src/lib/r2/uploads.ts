@@ -16,7 +16,6 @@ export async function generateUploadUrl(params: {
     Bucket: R2_BUCKET,
     Key: fileKey,
     ContentType: params.contentType,
-    ...(params.maxSizeBytes ? { ContentLength: params.maxSizeBytes } : {}),
   });
 
   const uploadUrl = await getSignedUrl(getR2Client(), command, {

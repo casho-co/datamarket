@@ -6,28 +6,28 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/access/Ownable.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 
+// PancakeSwap V3 SwapRouter interface (subset)
+interface ISwapRouter {
+    struct ExactInputSingleParams {
+        address tokenIn;
+        address tokenOut;
+        uint24 fee;
+        address recipient;
+        uint256 amountIn;
+        uint256 amountOutMinimum;
+        uint160 sqrtPriceLimitX96;
+    }
+
+    function exactInputSingle(
+        ExactInputSingleParams calldata params
+    ) external payable returns (uint256 amountOut);
+}
+
 /// @title BuybackHandler
 /// @notice Receives portion of platform fees and executes token buybacks via PancakeSwap V3 on BSC
 /// @dev Called by RevenueManager or authorized operators
 contract BuybackHandler is Ownable, ReentrancyGuard {
     using SafeERC20 for IERC20;
-
-    // PancakeSwap V3 SwapRouter interface (subset)
-    interface ISwapRouter {
-        struct ExactInputSingleParams {
-            address tokenIn;
-            address tokenOut;
-            uint24 fee;
-            address recipient;
-            uint256 amountIn;
-            uint256 amountOutMinimum;
-            uint160 sqrtPriceLimitX96;
-        }
-
-        function exactInputSingle(
-            ExactInputSingleParams calldata params
-        ) external payable returns (uint256 amountOut);
-    }
 
     // ============ STATE ============
 
@@ -79,7 +79,7 @@ contract BuybackHandler is Ownable, ReentrancyGuard {
 
     // ============ CORE FUNCTIONS ============
 
-    /// @notice Execute buyback — swap input token for protocol token via PancakeSwap
+    /// @notice Execute buyback - swap input token for protocol token via PancakeSwap
     /// @param tokenIn The input token (USDC/USDT from fees)
     /// @param amountIn Amount of input token to swap
     /// @param minAmountOut Minimum output to accept (slippage protection)

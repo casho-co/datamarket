@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { useParams, useRouter } from "next/navigation";
 import { useAuth } from "@/components/providers/auth-context";
+import { useSendTransaction, useWaitForTransactionReceipt } from "wagmi";
 
 const statusStyles: Record<string, string> = {
   open: "bg-green-500/10 text-green-400 border-green-500/20",
@@ -32,6 +33,16 @@ export default function ManageJobPage() {
   const [error, setError] = useState("");
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState("");
+  const [feedbackText, setFeedbackText] = useState("");
+  const [disputeReason, setDisputeReason] = useState("");
+  const [showChangesForm, setShowChangesForm] = useState(false);
+  const [showDisputeForm, setShowDisputeForm] = useState(false);
+  const [disputeStep, setDisputeStep] = useState<"idle" | "creating" | "signing" | "confirming" | "done">("idle");
+  const [pendingDisputeId, setPendingDisputeId] = useState<string | null>(null);
+
+  // Wagmi hooks for on-chain dispute transaction
+  const { sendTransaction: sendDisputeTx, data: disputeTxHash, error: disputeTxError, reset: resetDisputeTx } = useSendTransaction();
+  const { isSuccess: disputeTxConfirmed } = useWaitForTransactionReceipt({ hash: disputeTxHash });
 
   const loadData = useCallback(async () => {
     const token = await getToken();
@@ -70,6 +81,59 @@ export default function ManageJobPage() {
       setLoading(false);
     }
   }, [isAuthenticated, agentId, isLoading, loadData]);
+
+  // Handle dispute tx errors — signing is mandatory
+  useEffect(() => {
+    if (disputeTxError) {
+      const msg = disputeTxError.message || "Transaction failed";
+      if (msg.includes("User rejected") || msg.includes("denied")) {
+        setError("You must sign the dispute transaction to proceed. The dispute cannot be resolved without on-chain confirmation.");
+      } else {
+        setError("Dispute transaction failed: " + (msg.length > 150 ? msg.slice(0, 150) + "..." : msg));
+      }
+      setDisputeStep("idle");
+      setActionLoading(null);
+    }
+  }, [disputeTxError]);
+
+  // After dispute tx confirmed → verify with backend
+  useEffect(() => {
+    if (disputeTxConfirmed && disputeTxHash && pendingDisputeId) {
+      confirmDisputeOnChain(disputeTxHash, pendingDisputeId);
+    }
+  }, [disputeTxConfirmed, disputeTxHash, pendingDisputeId]);
+
+  async function confirmDisputeOnChain(txHash: string, disputeId: string) {
+    setDisputeStep("confirming");
+    const token = await getToken();
+    if (!token) return;
+
+    try {
+      const res = await fetch(`/api/v1/disputes/${disputeId}/confirm-tx`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ tx_hash: txHash }),
+      });
+
+      if (res.ok) {
+        setActionMessage("Dispute opened and confirmed on-chain. AI resolver will process it shortly.");
+      } else {
+        const data = await res.json();
+        setActionMessage("Dispute opened. On-chain confirmation: " + (data.error || "pending"));
+      }
+    } catch {
+      setActionMessage("Dispute opened. On-chain confirmation may still be processing.");
+    }
+
+    setDisputeStep("done");
+    setDisputeReason("");
+    setShowDisputeForm(false);
+    setActionLoading(null);
+    await loadData();
+  }
 
   async function handleAcceptBid(bidId: string) {
     setActionLoading(bidId);
@@ -132,6 +196,138 @@ export default function ManageJobPage() {
     setActionLoading(null);
   }
 
+  async function handleAcceptWork() {
+    if (!confirm("Accept the submitted work and release escrow funds?")) return;
+
+    setActionLoading("accept-work");
+    setActionMessage("");
+    setError("");
+
+    const token = await getToken();
+    if (!token) return;
+
+    try {
+      const res = await fetch(`/api/v1/jobs/${jobId}/accept`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        setActionMessage("Work accepted! Escrow funds released to worker.");
+        await loadData();
+      } else {
+        setError(data.error || "Failed to accept work");
+      }
+    } catch {
+      setError("Network error");
+    }
+    setActionLoading(null);
+  }
+
+  async function handleRequestChanges() {
+    if (!feedbackText.trim()) {
+      setError("Please provide feedback for the worker");
+      return;
+    }
+
+    setActionLoading("request-changes");
+    setActionMessage("");
+    setError("");
+
+    const token = await getToken();
+    if (!token) return;
+
+    try {
+      const res = await fetch(`/api/v1/jobs/${jobId}/request-changes`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ feedback: feedbackText.trim() }),
+      });
+
+      const data = await res.json();
+
+      if (res.ok) {
+        setActionMessage("Changes requested. Worker has been notified.");
+        setFeedbackText("");
+        setShowChangesForm(false);
+        await loadData();
+      } else {
+        setError(data.error || "Failed to request changes");
+      }
+    } catch {
+      setError("Network error");
+    }
+    setActionLoading(null);
+  }
+
+  async function handleOpenDispute() {
+    if (!disputeReason.trim()) {
+      setError("Please provide a reason for the dispute");
+      return;
+    }
+
+    if (!confirm("Open a dispute for this job? This will escalate to an AI resolver and requires a wallet signature to confirm on-chain.")) return;
+
+    setActionLoading("dispute");
+    setActionMessage("");
+    setError("");
+    setDisputeStep("creating");
+    resetDisputeTx();
+
+    const token = await getToken();
+    if (!token) return;
+
+    try {
+      // Step 1: Create dispute in DB + get unsigned on-chain tx
+      const res = await fetch(`/api/v1/jobs/${jobId}/dispute`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ reason: disputeReason.trim() }),
+      });
+
+      const data = await res.json();
+
+      if (!res.ok) {
+        setError(data.error || "Failed to open dispute");
+        setActionLoading(null);
+        setDisputeStep("idle");
+        return;
+      }
+
+      setPendingDisputeId(data.id);
+
+      // Step 2: If unsigned tx returned, prompt wallet signing
+      if (data.unsigned_dispute_tx) {
+        setDisputeStep("signing");
+        setActionMessage("Please sign the dispute transaction in your wallet...");
+        sendDisputeTx({
+          to: data.unsigned_dispute_tx.to as `0x${string}`,
+          data: data.unsigned_dispute_tx.data as `0x${string}`,
+        });
+      } else {
+        // No on-chain tx needed (escrow not on-chain)
+        setActionMessage("Dispute opened successfully. AI resolver will process it shortly.");
+        setDisputeReason("");
+        setShowDisputeForm(false);
+        setDisputeStep("done");
+        setActionLoading(null);
+        await loadData();
+      }
+    } catch {
+      setError("Network error");
+      setActionLoading(null);
+      setDisputeStep("idle");
+    }
+  }
+
   if (isLoading || loading) {
     return (
       <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
@@ -179,6 +375,11 @@ export default function ManageJobPage() {
 
   const canAcceptBids = job.status === "open";
   const canCancel = job.status === "open";
+  const hasSubmittedWork = job.assignments?.some((a: any) => a.status === "submitted");
+  const isCreator = agentId === job.creatorAgentId;
+  const maxRevisionsReached = job.assignments?.some(
+    (a: any) => a.status === "submitted" && a.revisionCount >= job.maxRevisions
+  );
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-8">
@@ -370,19 +571,201 @@ export default function ManageJobPage() {
                     </Link>
                   </div>
                   <span
-                    className={`px-2 py-0.5 rounded-lg text-[11px] font-medium ${bidStatusStyles[a.status] || "bg-surface text-muted"}`}
+                    className={`px-2 py-0.5 rounded-lg text-[11px] font-medium ${
+                      a.status === "submitted"
+                        ? "bg-blue-500/10 text-blue-400"
+                        : a.status === "accepted"
+                          ? "bg-green-500/10 text-green-400"
+                          : a.status === "disputed"
+                            ? "bg-red-500/10 text-red-400"
+                            : bidStatusStyles[a.status] || "bg-surface text-muted"
+                    }`}
                   >
                     {a.status}
                   </span>
                 </div>
-                <div className="text-[13px] text-muted flex flex-wrap gap-4">
+                <div className="text-[13px] text-muted flex flex-wrap gap-4 mb-2">
                   <span>
                     Escrow:{" "}
                     <span className="font-mono text-accent">
                       {a.escrowAmount} USDC
                     </span>
                   </span>
-                  {a.deliverableUrl && (
+                  {a.revisionCount > 0 && (
+                    <span>Revision: {a.revisionCount}</span>
+                  )}
+                  {a.submittedAt && (
+                    <span>
+                      Submitted: {new Date(a.submittedAt).toLocaleString()}
+                    </span>
+                  )}
+                </div>
+
+                {/* Submission Details */}
+                {a.status === "submitted" && (
+                  <div className="border-t border-border mt-3 pt-3 space-y-2">
+                    <p className="text-[11px] font-semibold text-muted uppercase tracking-wider">
+                      Submission
+                    </p>
+
+                    {a.inlineResponse && (
+                      <div className="bg-surface border border-border rounded-lg p-3">
+                        <p className="text-[11px] font-semibold text-muted mb-1">Response:</p>
+                        <p className="text-[13px] whitespace-pre-wrap leading-relaxed">
+                          {a.inlineResponse}
+                        </p>
+                      </div>
+                    )}
+
+                    {a.deliverableUrl && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-muted">Deliverable:</span>
+                        <a
+                          href={a.deliverableUrl}
+                          className="text-accent hover:underline text-[13px]"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                        >
+                          {a.deliverableUrl}
+                        </a>
+                      </div>
+                    )}
+
+                    {a.deliverableHash && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-muted">SHA-256:</span>
+                        <span className="text-[11px] font-mono text-foreground/70 break-all">
+                          {a.deliverableHash}
+                        </span>
+                      </div>
+                    )}
+
+                    {a.fileId && (
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-muted">File:</span>
+                        <button
+                          onClick={async () => {
+                            const token = await getToken();
+                            if (!token) return;
+                            try {
+                              const res = await fetch(`/api/v1/files/${a.fileId}/download-url`, {
+                                headers: { Authorization: `Bearer ${token}` },
+                              });
+                              if (res.ok) {
+                                const data = await res.json();
+                                window.open(data.download_url, "_blank");
+                              } else {
+                                setError("Failed to get download link");
+                              }
+                            } catch {
+                              setError("Failed to download file");
+                            }
+                          }}
+                          className="text-accent hover:underline text-[13px] font-medium"
+                        >
+                          Download File
+                        </button>
+                        <span className="text-[11px] font-mono text-muted">{a.fileId.slice(0, 8)}...</span>
+                      </div>
+                    )}
+
+                    {/* Action Buttons for Creator */}
+                    {isCreator && (
+                      <div className="flex flex-wrap gap-2 pt-2">
+                        <button
+                          onClick={handleAcceptWork}
+                          disabled={actionLoading === "accept-work"}
+                          className="text-[12px] bg-green-600 text-white px-4 py-2 rounded-lg font-semibold hover:bg-green-700 transition-colors disabled:opacity-50"
+                        >
+                          {actionLoading === "accept-work" ? "Accepting..." : "Accept Work"}
+                        </button>
+                        {maxRevisionsReached ? (
+                          <span className="text-[11px] text-yellow-400/70 italic px-2 py-2">
+                            Max revisions reached ({job.maxRevisions}). Accept or dispute.
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => setShowChangesForm(!showChangesForm)}
+                            disabled={!!actionLoading}
+                            className="text-[12px] border border-yellow-500/30 text-yellow-400 px-4 py-2 rounded-lg font-semibold hover:bg-yellow-500/10 transition-colors disabled:opacity-50"
+                          >
+                            Request Changes
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setShowDisputeForm(!showDisputeForm)}
+                          disabled={!!actionLoading}
+                          className="text-[12px] border border-red-500/30 text-red-400 px-4 py-2 rounded-lg font-semibold hover:bg-red-500/10 transition-colors disabled:opacity-50"
+                        >
+                          Open Dispute
+                        </button>
+                      </div>
+                    )}
+
+                    {/* Request Changes Form */}
+                    {showChangesForm && isCreator && (
+                      <div className="bg-surface border border-yellow-500/20 rounded-lg p-3 mt-2">
+                        <textarea
+                          value={feedbackText}
+                          onChange={(e) => setFeedbackText(e.target.value)}
+                          placeholder="Describe what changes are needed..."
+                          className="w-full bg-surface-2 border border-border rounded-lg p-2.5 text-[13px] text-foreground placeholder:text-muted resize-none focus:outline-none focus:border-accent"
+                          rows={3}
+                        />
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            onClick={handleRequestChanges}
+                            disabled={actionLoading === "request-changes"}
+                            className="text-[12px] bg-yellow-600 text-white px-4 py-1.5 rounded-lg font-semibold hover:bg-yellow-700 transition-colors disabled:opacity-50"
+                          >
+                            {actionLoading === "request-changes" ? "Sending..." : "Send Feedback"}
+                          </button>
+                          <button
+                            onClick={() => { setShowChangesForm(false); setFeedbackText(""); }}
+                            className="text-[12px] text-muted px-3 py-1.5 hover:text-foreground transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Dispute Form */}
+                    {showDisputeForm && isCreator && (
+                      <div className="bg-surface border border-red-500/20 rounded-lg p-3 mt-2">
+                        <textarea
+                          value={disputeReason}
+                          onChange={(e) => setDisputeReason(e.target.value)}
+                          placeholder="Explain the reason for this dispute..."
+                          className="w-full bg-surface-2 border border-border rounded-lg p-2.5 text-[13px] text-foreground placeholder:text-muted resize-none focus:outline-none focus:border-accent"
+                          rows={3}
+                        />
+                        <div className="flex gap-2 mt-2">
+                          <button
+                            onClick={handleOpenDispute}
+                            disabled={actionLoading === "dispute"}
+                            className="text-[12px] bg-red-600 text-white px-4 py-1.5 rounded-lg font-semibold hover:bg-red-700 transition-colors disabled:opacity-50"
+                          >
+                            {disputeStep === "creating" ? "Creating..." :
+                             disputeStep === "signing" ? "Sign in Wallet..." :
+                             disputeStep === "confirming" ? "Confirming..." :
+                             "Open Dispute"}
+                          </button>
+                          <button
+                            onClick={() => { setShowDisputeForm(false); setDisputeReason(""); }}
+                            className="text-[12px] text-muted px-3 py-1.5 hover:text-foreground transition-colors"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Non-submitted assignment: just show deliverable link if present */}
+                {a.status !== "submitted" && a.deliverableUrl && (
+                  <div className="text-[13px] text-muted">
                     <a
                       href={a.deliverableUrl}
                       className="text-accent hover:underline"
@@ -391,8 +774,8 @@ export default function ManageJobPage() {
                     >
                       View Deliverable
                     </a>
-                  )}
-                </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>

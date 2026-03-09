@@ -100,6 +100,7 @@ export async function POST(
       { status: 201 }
     ), rlHeaders);
   } catch (err: unknown) {
+    console.error("[POST /jobs/:id/bids]", err instanceof Error ? err.message : err);
     return NextResponse.json(
       { error: safeErrorMessage(err) },
       { status: 400 }

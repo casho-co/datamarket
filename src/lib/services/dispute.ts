@@ -26,6 +26,9 @@ import {
 import {
   oracleResolveDispute as onChainResolveDispute,
   oracleResolveDisputeSplit as onChainResolveDisputeSplit,
+  getOnChainEscrow,
+  OnChainEscrowState,
+  buildDisputeData,
 } from "@/lib/bsc/escrow-contract";
 import { giveOnChainFeedback } from "@/lib/bsc/erc8004";
 
@@ -82,34 +85,66 @@ export async function openDispute(params: {
         .update(escrows)
         .set({ status: "disputed" })
         .where(eq(escrows.assignmentId, assignment.id));
+
     }
 
     // Set voting deadline: 3 days from now
     const votingDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+
+    // Determine resolver: job-specific > AI default resolver
+    let resolverAgentId = job.disputeAgentId || null;
+    if (!resolverAgentId) {
+      const [aiResolver] = await tx
+        .select()
+        .from(agents)
+        .where(eq(agents.handle, "datalayer_resolver"));
+      if (aiResolver) resolverAgentId = aiResolver.id;
+    }
 
     const [dispute] = await tx
       .insert(disputes)
       .values({
         assignmentId: assignment.id,
         openerAgentId: params.openerAgentId,
-        resolverAgentId: job.disputeAgentId || null,
+        resolverAgentId,
         reason: params.reason,
         depositAmount,
         votingDeadline,
       })
       .returning();
 
-    return dispute;
+    // Build unsigned on-chain dispute tx for the buyer to sign
+    const unsignedDisputeTx = escrow?.onChainTxHash
+      ? buildDisputeData(escrow.refId)
+      : null;
+
+    return { dispute, unsignedDisputeTx };
   });
+
+  const dispute = result.dispute;
+
+  // Post-transaction: trigger AI resolver immediately (non-blocking)
+  if (dispute.resolverAgentId) {
+    import("@/lib/services/ai-dispute-resolver")
+      .then(({ resolveDisputeWithAI }) =>
+        resolveDisputeWithAI(dispute.id, dispute.resolverAgentId!)
+      )
+      .then((r) => {
+        if (r) console.log(`[AI-Resolver] Immediate resolution: ${r.ruling} — ${r.reasoning}`);
+      })
+      .catch((err) =>
+        console.error(`[AI-Resolver] Immediate resolution failed, will retry via cron:`, err)
+      );
+  }
 
   // Post-transaction side effects
   await emitFeedEvent("dispute_opened", params.jobId, {
     job_id: params.jobId,
-    dispute_id: result.id,
+    dispute_id: dispute.id,
     opener_agent_id: params.openerAgentId,
   });
 
-  return result;
+  return { ...dispute, unsigned_dispute_tx: result.unsignedDisputeTx };
 }
 
 export async function addEvidence(params: {
@@ -268,12 +303,24 @@ export async function resolveDispute(params: {
     } else {
       // Resolve on-chain: requester_wins, worker_wins, or split
       let releaseTxHash: string;
+
+      // Check on-chain state to determine the right contract call
+      const onChainState = await getOnChainEscrow(escrow.refId);
+      const isDisputedOnChain = onChainState.disputed || onChainState.state === OnChainEscrowState.DISPUTED;
+
+      if (!isDisputedOnChain) {
+        throw new Error(
+          "On-chain escrow is not in disputed state. The buyer must sign the dispute transaction first."
+        );
+      }
+
+      // Normal path: escrow is disputed on-chain, use resolveDispute
       if (params.ruling === "split") {
         const bps = params.splitBps || 5000;
-        releaseTxHash = await onChainResolveDisputeSplit(escrow.id, bps);
+        releaseTxHash = await onChainResolveDisputeSplit(escrow.refId, bps);
       } else {
         const releaseToSeller = params.ruling === "worker_wins";
-        releaseTxHash = await onChainResolveDispute(escrow.id, releaseToSeller);
+        releaseTxHash = await onChainResolveDispute(escrow.refId, releaseToSeller);
       }
 
       // Dispute deposit was on-chain — no off-chain balance to refund

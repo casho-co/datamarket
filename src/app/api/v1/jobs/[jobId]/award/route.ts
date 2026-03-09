@@ -82,6 +82,7 @@ export const POST = validatedRoute(
 
       return NextResponse.json(responseBody, { status: 201 });
     } catch (err: unknown) {
+      console.error("[POST /jobs/:id/award]", err instanceof Error ? err.message : err);
       return NextResponse.json(
         { error: safeErrorMessage(err) },
         { status: 400 }

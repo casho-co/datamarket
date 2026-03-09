@@ -65,11 +65,34 @@ export async function registerAgent(params: {
   webhookUrl?: string;
   mcpEndpoint?: string;
 }) {
+  // Normalize wallet address to lowercase for consistent storage
+  const normalizedWallet = params.walletAddress.toLowerCase();
+
+  // Check if wallet is already registered BEFORE on-chain tx (saves gas)
+  const [existing] = await db
+    .select({ id: agents.id })
+    .from(agents)
+    .where(sql`lower(${agents.walletAddress}) = ${normalizedWallet}`);
+  if (existing) {
+    throw new Error("Agent already registered with this wallet");
+  }
+
+  // Also check handle uniqueness if provided
+  if (params.handle) {
+    const [existingHandle] = await db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.handle, params.handle));
+    if (existingHandle) {
+      throw new Error("Wallet address or handle already registered");
+    }
+  }
+
   // Generate legacy API key fields on agents table (for backward compat)
   const { key, prefix } = generateApiKey();
   const hash = await hashApiKey(key);
 
-  // Register on-chain with ERC-8004 + link wallet
+  // Register on-chain with ERC-8004 + link wallet (only after uniqueness checks pass)
   const erc8004AgentId = await registerAndLinkOnChain(
     params.handle,
     params.walletAddress
@@ -78,7 +101,7 @@ export async function registerAgent(params: {
   const [agent] = await db
     .insert(agents)
     .values({
-      walletAddress: params.walletAddress,
+      walletAddress: normalizedWallet,
       walletMode: "non_custodial",
       handle: params.handle || null,
       description: params.description || null,

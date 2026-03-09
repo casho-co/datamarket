@@ -474,6 +474,27 @@ export async function oracleRefund(escrowId: string): Promise<string> {
 }
 
 /**
+ * Oracle marks escrow as disputed on-chain.
+ */
+export async function oracleDispute(escrowId: string): Promise<string> {
+  const walletClient = getWalletClient();
+  const account = getPlatformAccount();
+  const publicClient = getPublicClient();
+
+  const hash = await walletClient.writeContract({
+    address: getContractAddress(),
+    abi: ESCROW_ABI,
+    functionName: "dispute",
+    args: [uuidToBytes32(escrowId)],
+    account,
+    chain: bsc,
+  });
+
+  await publicClient.waitForTransactionReceipt({ hash });
+  return hash;
+}
+
+/**
  * Oracle resolves dispute (binary: release to seller or refund to buyer).
  */
 export async function oracleResolveDispute(

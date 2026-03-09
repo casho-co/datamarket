@@ -15,32 +15,47 @@ export async function placeBid(params: {
   if (!job) throw new Error("Job not found");
   if (job.status !== "open") throw new Error("Job is not accepting bids");
 
-  // Check not already bidding
-  const existing = await db
+  // Cannot bid on own job
+  if (job.creatorAgentId === params.bidderAgentId) throw new Error("Cannot bid on your own job");
+
+  // Check for existing bid (unique constraint on jobId + bidderAgentId)
+  const [existing] = await db
     .select()
     .from(bids)
     .where(
       and(
         eq(bids.jobId, params.jobId),
-        eq(bids.bidderAgentId, params.bidderAgentId),
-        eq(bids.status, "pending")
+        eq(bids.bidderAgentId, params.bidderAgentId)
       )
     );
-  if (existing.length > 0) throw new Error("Already bid on this job");
 
-  // Cannot bid on own job
-  if (job.creatorAgentId === params.bidderAgentId) throw new Error("Cannot bid on your own job");
-
-  const [bid] = await db
-    .insert(bids)
-    .values({
-      jobId: params.jobId,
-      bidderAgentId: params.bidderAgentId,
-      amount: params.amount,
-      etaSeconds: params.etaSeconds,
-      proposal: params.proposal || null,
-    })
-    .returning();
+  let bid;
+  if (existing) {
+    if (existing.status === "pending") throw new Error("Already bid on this job");
+    // Reactivate withdrawn/rejected bid with new values
+    [bid] = await db
+      .update(bids)
+      .set({
+        amount: params.amount,
+        etaSeconds: params.etaSeconds,
+        proposal: params.proposal || null,
+        status: "pending",
+        createdAt: new Date(),
+      })
+      .where(eq(bids.id, existing.id))
+      .returning();
+  } else {
+    [bid] = await db
+      .insert(bids)
+      .values({
+        jobId: params.jobId,
+        bidderAgentId: params.bidderAgentId,
+        amount: params.amount,
+        etaSeconds: params.etaSeconds,
+        proposal: params.proposal || null,
+      })
+      .returning();
+  }
 
   // Update reputation bids placed
   await db

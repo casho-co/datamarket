@@ -8,7 +8,7 @@ import { logAudit, getClientIp } from "@/lib/services/audit";
 import { safeErrorMessage } from "@/lib/utils/safe-error";
 import { db } from "@/lib/db";
 import { agents } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { DEFAULT_SCOPES } from "@/lib/auth/scopes";
 
 export const POST = validatedRoute(
@@ -42,7 +42,7 @@ export const POST = validatedRoute(
           handle: agents.handle,
         })
         .from(agents)
-        .where(eq(agents.walletAddress, body.wallet_address));
+        .where(sql`lower(${agents.walletAddress}) = ${body.wallet_address.toLowerCase()}`);
 
       if (!agent) {
         return NextResponse.json(

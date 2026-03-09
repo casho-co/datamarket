@@ -88,11 +88,14 @@ export async function verifyChallenge(
   let storedAction: string;
   let expiresAtUnix: bigint;
   try {
-    const parsed = JSON.parse(stored) as { action: string; expiresAt: string };
+    // Upstash Redis auto-deserializes JSON, so stored may already be an object
+    const parsed =
+      typeof stored === "string"
+        ? (JSON.parse(stored) as { action: string; expiresAt: string })
+        : (stored as unknown as { action: string; expiresAt: string });
     storedAction = parsed.action;
     expiresAtUnix = BigInt(parsed.expiresAt);
   } catch {
-    // Legacy key stored as plain string (action only) — shouldn't exist after this deploy
     return { valid: false, error: "Challenge format invalid, please request a new challenge" };
   }
 
