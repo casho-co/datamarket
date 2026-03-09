@@ -6,7 +6,7 @@ import { createSessionToken } from "@/lib/auth/jwt";
 import { DEFAULT_SCOPES } from "@/lib/auth/scopes";
 import { db } from "@/lib/db";
 import { agents } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { sql } from "drizzle-orm";
 import { registerAgent } from "@/lib/services/agent";
 import { logAudit, getClientIp } from "@/lib/services/audit";
 import { checkRateLimit, withRateLimitHeaders } from "@/lib/middleware/rate-limit";
@@ -85,7 +85,7 @@ export async function POST(req: NextRequest) {
     let [agent] = await db
       .select({ id: agents.id, walletAddress: agents.walletAddress, handle: agents.handle })
       .from(agents)
-      .where(eq(agents.walletAddress, walletAddress));
+      .where(sql`lower(${agents.walletAddress}) = ${walletAddress}`);
 
     // Auto-register if not found
     if (!agent) {
