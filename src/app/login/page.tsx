@@ -86,6 +86,7 @@ export default function LoginPage() {
 
       // ── Step 4: build SIWE message ────────────────────────────────────────
       const chainId = 56; // BSC mainnet
+      const expirationTime = new Date(Date.now() + 5 * 60 * 1000); // 5 min, matches nonce TTL
       const message = createSiweMessage({
         domain: window.location.host,
         address: address as `0x${string}`,
@@ -94,6 +95,7 @@ export default function LoginPage() {
         version: "1",
         chainId,
         nonce,
+        expirationTime,
       });
 
       // ── Step 5: sign ──────────────────────────────────────────────────────
