@@ -47,14 +47,22 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Step 3: Validate SIWE message fields (domain, expiration, structure)
+    // Step 3: Validate SIWE message fields (domain, scheme, address, expiration)
+    if (!process.env.NEXT_PUBLIC_BASE_URL) {
+      throw new Error("NEXT_PUBLIC_BASE_URL environment variable is required");
+    }
+    const baseUrl = new URL(process.env.NEXT_PUBLIC_BASE_URL);
     const isValid = validateSiweMessage({
       message: siweMessage,
+      domain: baseUrl.host,
+      scheme: baseUrl.protocol.replace(":", ""),
     });
     if (!isValid) {
       console.error("[siwe] SIWE message validation failed", {
         domain: siweMessage.domain,
-        expirationTime: siweMessage.expirationTime,
+        expectedDomain: baseUrl.host,
+        scheme: siweMessage.scheme,
+        expectedScheme: baseUrl.protocol.replace(":", ""),
       });
       return withRateLimitHeaders(
         NextResponse.json({ error: "Invalid SIWE message" }, { status: 422 }),
