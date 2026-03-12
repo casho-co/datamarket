@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { agents, apiKeys } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
-import { verifyApiKey } from "./api-key";
+import { verifyApiKey, API_KEY_PREFIX_LENGTH } from "./api-key";
 import { verifySessionToken } from "./jwt";
 import type { Scope } from "./scopes";
 
@@ -69,7 +69,7 @@ async function authenticateWithJwt(
 async function authenticateWithApiKey(
   key: string
 ): Promise<AgentAuth | null> {
-  const prefix = key.slice(0, 12);
+  const prefix = key.slice(0, API_KEY_PREFIX_LENGTH);
 
   const matchingKeys = await db
     .select({

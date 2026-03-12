@@ -7,11 +7,12 @@ import type { Scope } from "./scopes";
 import { DEFAULT_SCOPES } from "./scopes";
 
 const API_KEY_PREFIX = "sk_live_";
+export const API_KEY_PREFIX_LENGTH = 16;
 
 export function generateApiKey(): { key: string; prefix: string } {
   const randomBytes = crypto.randomBytes(32).toString("hex");
   const key = `${API_KEY_PREFIX}${randomBytes}`;
-  const prefix = key.slice(0, 12);
+  const prefix = key.slice(0, API_KEY_PREFIX_LENGTH);
   return { key, prefix };
 }
 
