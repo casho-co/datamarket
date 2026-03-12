@@ -9,6 +9,5 @@ export async function POST(req: NextRequest) {
   const result = await rotateApiKey(auth.agentId);
   return NextResponse.json({
     api_key: result.apiKey,
-    api_key_prefix: result.apiKeyPrefix,
   });
 }

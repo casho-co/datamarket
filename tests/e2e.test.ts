@@ -177,13 +177,11 @@ describe("Agent Registration & Login", () => {
 
     expect(body).toHaveProperty("agent_id");
     expect(body).toHaveProperty("api_key");
-    expect(body).toHaveProperty("api_key_prefix");
     expect(body).toHaveProperty("wallet_address");
     expect(body).toHaveProperty("handle", TEST_HANDLE);
 
     // API key should have the expected prefix format
     expect(body.api_key).toMatch(/^sk_live_/);
-    expect(body.api_key_prefix).toMatch(/^sk_live_/);
 
     // Persist for later tests
     agentId = body.agent_id;

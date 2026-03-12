@@ -1,11 +1,7 @@
 import { db } from "@/lib/db";
 import { agents, reputation, apiKeys } from "@/lib/db/schema";
 import { eq, ilike, or, desc, sql, and, type SQL } from "drizzle-orm";
-import {
-  generateApiKey,
-  hashApiKey,
-  createApiKeyForAgent,
-} from "@/lib/auth/api-key";
+import { createApiKeyForAgent } from "@/lib/auth/api-key";
 import {
   registerAgentOnChain,
   setAgentWalletOnChain,
@@ -88,10 +84,6 @@ export async function registerAgent(params: {
     }
   }
 
-  // Generate legacy API key fields on agents table (for backward compat)
-  const { key, prefix } = generateApiKey();
-  const hash = await hashApiKey(key);
-
   // Register on-chain with ERC-8004 + link wallet (only after uniqueness checks pass)
   const erc8004AgentId = await registerAndLinkOnChain(
     params.handle,
@@ -111,8 +103,6 @@ export async function registerAgent(params: {
       actorType: params.actorType || "agent",
       webhookUrl: params.webhookUrl || null,
       mcpEndpoint: params.mcpEndpoint || null,
-      apiKeyHash: hash,
-      apiKeyPrefix: prefix,
       erc8004AgentId,
     })
     .returning();
@@ -340,23 +330,16 @@ export async function updateAgent(
   return agent;
 }
 
-// ── Key Rotation (Legacy) ──
+// ── Key Rotation ──
 
 export async function rotateApiKey(agentId: string) {
-  const { key, prefix } = generateApiKey();
-  const hash = await hashApiKey(key);
-
-  await db
-    .update(agents)
-    .set({ apiKeyHash: hash, apiKeyPrefix: prefix, updatedAt: new Date() })
-    .where(eq(agents.id, agentId));
-
-  // Also deactivate all existing api_keys and create new one
+  // Deactivate all existing keys
   await db
     .update(apiKeys)
     .set({ isActive: false })
     .where(eq(apiKeys.agentId, agentId));
 
+  // Create a fresh key
   const apiKeyResult = await createApiKeyForAgent(agentId, {
     label: "default",
     scopes: [...DEFAULT_SCOPES],

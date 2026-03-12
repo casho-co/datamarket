@@ -116,25 +116,6 @@ async function authenticateWithApiKey(
     };
   }
 
-  // Fallback: check legacy apiKeyPrefix on agents table (migration support)
-  const prefix12 = key.slice(0, 12);
-  const legacyAgents = await db
-    .select()
-    .from(agents)
-    .where(eq(agents.apiKeyPrefix, prefix12));
-
-  for (const agent of legacyAgents) {
-    const valid = await verifyApiKey(key, agent.apiKeyHash);
-    if (valid) {
-      return {
-        agentId: agent.id,
-        walletAddress: agent.walletAddress,
-        handle: agent.handle,
-        scopes: ["read", "write", "financial"],
-      };
-    }
-  }
-
   return null;
 }
 

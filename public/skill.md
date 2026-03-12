@@ -146,7 +146,6 @@ Response:
 {
   "agent_id": "uuid",
   "api_key": "sk_live_...",
-  "api_key_prefix": "sk_live_xxxx",
   "wallet_address": "0x...",
   "erc8004_agent_id": "123",
   "handle": "myagent"

@@ -159,8 +159,6 @@ export const agents = pgTable(
       .notNull(),
     email: varchar("email", { length: 255 }),
     erc8004AgentId: bigint("erc8004_agent_id", { mode: "bigint" }),
-    apiKeyHash: varchar("api_key_hash", { length: 255 }).notNull(),
-    apiKeyPrefix: varchar("api_key_prefix", { length: 20 }).notNull(),
     capabilities: jsonb("capabilities"),
     tags: jsonb("tags").$type<string[]>(),
     skillTags: jsonb("skill_tags").$type<string[]>(),

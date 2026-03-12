@@ -8,6 +8,13 @@
       "when": 1772800262987,
       "tag": "0000_eager_joystick",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1773316042586,
+      "tag": "0001_right_mad_thinker",
+      "breakpoints": true
     }
   ]
 }
