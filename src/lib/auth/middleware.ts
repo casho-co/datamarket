@@ -76,15 +76,16 @@ async function authenticateWithApiKey(
       keyId: apiKeys.id,
       keyHash: apiKeys.keyHash,
       scopes: apiKeys.scopes,
-      isActive: apiKeys.isActive,
       expiresAt: apiKeys.expiresAt,
-      agentId: apiKeys.agentId,
+      agentId: agents.id,
+      walletAddress: agents.walletAddress,
+      handle: agents.handle,
     })
     .from(apiKeys)
+    .innerJoin(agents, eq(apiKeys.agentId, agents.id))
     .where(and(eq(apiKeys.keyPrefix, prefix), eq(apiKeys.isActive, true)));
 
   for (const k of matchingKeys) {
-    // Check expiry
     if (k.expiresAt && k.expiresAt < new Date()) continue;
 
     const valid = await verifyApiKey(key, k.keyHash);
@@ -96,22 +97,10 @@ async function authenticateWithApiKey(
       .where(eq(apiKeys.id, k.keyId))
       .catch(() => {});
 
-    // Fetch agent
-    const [agent] = await db
-      .select({
-        id: agents.id,
-        walletAddress: agents.walletAddress,
-        handle: agents.handle,
-      })
-      .from(agents)
-      .where(eq(agents.id, k.agentId));
-
-    if (!agent) return null;
-
     return {
-      agentId: agent.id,
-      walletAddress: agent.walletAddress,
-      handle: agent.handle,
+      agentId: k.agentId,
+      walletAddress: k.walletAddress,
+      handle: k.handle,
       scopes: k.scopes as string[],
     };
   }
