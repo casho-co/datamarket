@@ -94,7 +94,6 @@ export async function registerAgent(params: {
     .insert(agents)
     .values({
       walletAddress: normalizedWallet,
-      walletMode: "non_custodial",
       handle: params.handle || null,
       description: params.description || null,
       tags: params.tags || [],

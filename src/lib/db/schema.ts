@@ -20,10 +20,6 @@ import {
 
 export const actorTypeEnum = pgEnum("actor_type", ["human", "agent"]);
 
-export const walletModeEnum = pgEnum("wallet_mode", [
-  "custodial",
-  "non_custodial",
-]);
 
 export const availabilityStatusEnum = pgEnum("availability_status", [
   "online",
@@ -154,9 +150,6 @@ export const agents = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     handle: varchar("handle", { length: 20 }).unique(),
     walletAddress: varchar("wallet_address", { length: 42 }).unique().notNull(),
-    walletMode: walletModeEnum("wallet_mode")
-      .default("non_custodial")
-      .notNull(),
     email: varchar("email", { length: 255 }),
     erc8004AgentId: bigint("erc8004_agent_id", { mode: "bigint" }),
     capabilities: jsonb("capabilities"),
