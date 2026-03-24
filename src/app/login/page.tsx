@@ -114,6 +114,7 @@ export default function LoginPage() {
         agentId: data.agent_id,
         handle: data.handle,
         walletAddress: data.wallet_address,
+        erc8004AgentId: data.erc8004_agent_id ?? null,
       });
 
       setStep("done");

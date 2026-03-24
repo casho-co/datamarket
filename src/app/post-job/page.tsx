@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { useAuth } from "@/components/providers/auth-context";
 import { useWriteContract, useWaitForTransactionReceipt, useAccount, useSendTransaction } from "wagmi";
 
@@ -19,7 +20,7 @@ type Step = "idle" | "creating" | "approving" | "escrow" | "confirming" | "verif
 
 export default function PostJobPage() {
   const router = useRouter();
-  const { isAuthenticated, isLoading, login, getToken } = useAuth();
+  const { isAuthenticated, isLoading, login, getToken, hasOnChainIdentity } = useAuth();
   const { address: connectedAddress } = useAccount();
 
   const [title, setTitle] = useState("");
@@ -229,8 +230,12 @@ export default function PostJobPage() {
       const data = await res.json();
 
       if (!res.ok) {
-        if (data.details) setFieldErrors(data.details);
-        setError(data.error || "Failed to create job");
+        if (res.status === 403 && data.next_actions) {
+          setError("On-chain identity required. Set up your identity from the dashboard.");
+        } else {
+          if (data.details) setFieldErrors(data.details);
+          setError(data.error || "Failed to create job");
+        }
         setSubmitting(false);
         setStep("idle");
         return;
@@ -291,6 +296,30 @@ export default function PostJobPage() {
           >
             Connect Wallet
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  if (!hasOnChainIdentity) {
+    return (
+      <div className="max-w-md mx-auto px-4 py-24">
+        <div className="bg-surface border border-border rounded-lg p-5 text-center">
+          <div className="w-12 h-12 rounded-lg bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto mb-5">
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="text-amber-400">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+            </svg>
+          </div>
+          <h1 className="text-xl font-bold mb-1.5">Identity Required</h1>
+          <p className="text-[13px] text-muted mb-5">
+            Set up your on-chain identity before posting jobs
+          </p>
+          <Link
+            href="/dashboard"
+            className="w-full bg-accent text-background py-2.5 rounded-lg font-semibold text-sm hover:bg-accent-dim transition-colors inline-block"
+          >
+            Set Up Identity
+          </Link>
         </div>
       </div>
     );

@@ -91,7 +91,7 @@ export async function POST(req: NextRequest) {
 
     // Look up agent by wallet address
     let [agent] = await db
-      .select({ id: agents.id, walletAddress: agents.walletAddress, handle: agents.handle })
+      .select({ id: agents.id, walletAddress: agents.walletAddress, handle: agents.handle, erc8004AgentId: agents.erc8004AgentId })
       .from(agents)
       .where(sql`lower(${agents.walletAddress}) = ${walletAddress}`);
 
@@ -112,7 +112,7 @@ export async function POST(req: NextRequest) {
         ipAddress: ip,
       });
 
-      agent = { id: result.agentId, walletAddress: result.walletAddress, handle };
+      agent = { id: result.agentId, walletAddress: result.walletAddress, handle, erc8004AgentId: null };
     }
 
     // Step 5: Consume nonce AFTER all DB writes succeed (one-time use)
@@ -142,6 +142,7 @@ export async function POST(req: NextRequest) {
         agent_id: agent.id,
         wallet_address: agent.walletAddress,
         handle: agent.handle,
+        erc8004_agent_id: agent.erc8004AgentId?.toString() || null,
       }),
       rlHeaders,
     );
