@@ -1,4 +1,4 @@
-import type { Hex } from "viem";
+import { type Hex, encodeFunctionData } from "viem";
 import { bsc } from "viem/chains";
 import { getPublicClient, getWalletClient, getPlatformAccount } from "./client";
 import {
@@ -147,120 +147,117 @@ const REPUTATION_REGISTRY_ABI = [
 const TRANSFER_EVENT_TOPIC =
   "0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef" as const;
 
-// ── Registration ──
+// ── Identity Helpers ──
 
-export async function registerAgentOnChain(
-  agentURI: string
-): Promise<bigint> {
-  const walletClient = getWalletClient();
-  const account = getPlatformAccount();
-
-  const hash = await walletClient.writeContract({
+/**
+ * Check how many ERC-8004 identity NFTs a wallet owns.
+ * Used to prevent duplicate minting — if > 0, agent should link instead of mint.
+ */
+export async function getIdentityBalanceOf(walletAddress: string): Promise<bigint> {
+  const client = getPublicClient();
+  const balance = await client.readContract({
     address: ERC8004_IDENTITY_REGISTRY as Hex,
+    abi: IDENTITY_REGISTRY_ABI,
+    functionName: "balanceOf",
+    args: [walletAddress as Hex],
+  });
+  return balance as bigint;
+}
+
+/**
+ * Check who owns a specific ERC-8004 identity NFT.
+ * Used to verify an agent actually owns the tokenId they claim.
+ */
+export async function getIdentityOwnerOf(tokenId: bigint): Promise<string> {
+  const client = getPublicClient();
+  const owner = await client.readContract({
+    address: ERC8004_IDENTITY_REGISTRY as Hex,
+    abi: IDENTITY_REGISTRY_ABI,
+    functionName: "ownerOf",
+    args: [tokenId],
+  });
+  return (owner as string).toLowerCase();
+}
+
+/**
+ * Build unsigned transaction data for minting an ERC-8004 identity NFT.
+ * Agent signs and submits this TX themselves — they become the owner.
+ */
+export function buildMintIdentityData(agentURI: string): { to: string; data: Hex } {
+  const data = encodeFunctionData({
     abi: IDENTITY_REGISTRY_ABI,
     functionName: "register",
     args: [agentURI],
-    account,
-    chain: bsc,
   });
+  return { to: ERC8004_IDENTITY_REGISTRY, data };
+}
 
-  const client = getPublicClient();
-  const receipt = await client.waitForTransactionReceipt({ hash });
-
-  // Parse the ERC-721 Transfer event to get the minted tokenId.
-  // Transfer(from=0x0, to=owner, tokenId) is emitted on mint.
+/**
+ * Extract the minted tokenId from a transaction receipt's Transfer event.
+ * Transfer(from=0x0, to=owner, tokenId) is emitted on mint.
+ */
+export function parseTokenIdFromReceipt(receipt: { logs: readonly { address: string; topics: readonly string[] }[] }): bigint | null {
   const transferLog = receipt.logs.find(
     (log) =>
-      log.address.toLowerCase() ===
-        ERC8004_IDENTITY_REGISTRY.toLowerCase() &&
+      log.address.toLowerCase() === ERC8004_IDENTITY_REGISTRY.toLowerCase() &&
       log.topics[0] === TRANSFER_EVENT_TOPIC &&
-      // from = address(0) indicates a mint
-      log.topics[1] ===
-        "0x0000000000000000000000000000000000000000000000000000000000000000"
+      log.topics[1] === "0x0000000000000000000000000000000000000000000000000000000000000000"
   );
-
   if (transferLog && transferLog.topics[3]) {
     return BigInt(transferLog.topics[3]);
   }
-
-  throw new Error(
-    "Failed to parse agent ID from registration transaction — Transfer event not found"
-  );
+  return null;
 }
-
-// ── Set Agent Wallet On-Chain ──
 
 /**
- * Link an agent's wallet address on-chain using the metadata key "agentWallet".
- * This allows other platforms to discover where to send payments to this agent.
- *
- * Note: The full ERC-8004 setAgentWallet() requires an EIP-712 signature from
- * the new wallet. We use setMetadata() with the "agentWallet" key instead,
- * which the platform (as NFT owner) can call directly.
+ * List all ERC-8004 identity NFTs owned by a wallet.
+ * Uses Registered event log scanning (works regardless of ERC-721 Enumerable support).
  */
-export async function setAgentWalletOnChain(
-  agentId: bigint,
-  walletAddress: string
-): Promise<string> {
-  const walletClient = getWalletClient();
-  const account = getPlatformAccount();
+export async function getIdentitiesForWallet(walletAddress: string): Promise<
+  { tokenId: bigint; tokenURI: string; owner: string }[]
+> {
+  const client = getPublicClient();
 
-  // Encode address as bytes (ABI-encoded address = 32 bytes, left-padded)
-  const encodedWallet = ("0x" +
-    walletAddress.slice(2).toLowerCase().padStart(64, "0")) as Hex;
-
-  const hash = await walletClient.writeContract({
+  // Scan Registered events where owner = walletAddress
+  const logs = await client.getLogs({
     address: ERC8004_IDENTITY_REGISTRY as Hex,
-    abi: IDENTITY_REGISTRY_ABI,
-    functionName: "setMetadata",
-    args: [agentId, "agentWallet", encodedWallet],
-    account,
-    chain: bsc,
+    event: {
+      name: "Registered",
+      type: "event",
+      inputs: [
+        { name: "agentId", type: "uint256", indexed: true },
+        { name: "agentURI", type: "string", indexed: false },
+        { name: "owner", type: "address", indexed: true },
+      ],
+    },
+    args: { owner: walletAddress as Hex },
+    fromBlock: BigInt(0),
+    toBlock: "latest",
   });
 
-  const client = getPublicClient();
-  await client.waitForTransactionReceipt({ hash });
-  return hash;
-}
-
-// ── Read Agent Info ──
-
-export async function getAgentOnChainInfo(agentId: bigint): Promise<{
-  owner: string;
-  tokenURI: string;
-  wallet: string;
-} | null> {
-  const client = getPublicClient();
-  try {
-    const [owner, tokenURI, wallet] = await Promise.all([
-      client.readContract({
-        address: ERC8004_IDENTITY_REGISTRY as Hex,
-        abi: IDENTITY_REGISTRY_ABI,
-        functionName: "ownerOf",
-        args: [agentId],
-      }),
-      client.readContract({
-        address: ERC8004_IDENTITY_REGISTRY as Hex,
-        abi: IDENTITY_REGISTRY_ABI,
-        functionName: "tokenURI",
-        args: [agentId],
-      }),
-      client.readContract({
-        address: ERC8004_IDENTITY_REGISTRY as Hex,
-        abi: IDENTITY_REGISTRY_ABI,
-        functionName: "getAgentWallet",
-        args: [agentId],
-      }),
-    ]);
-    return {
-      owner: owner as string,
-      tokenURI: tokenURI as string,
-      wallet: wallet as string,
-    };
-  } catch {
-    return null;
+  // For each registered identity, verify current ownership (may have been transferred)
+  const results: { tokenId: bigint; tokenURI: string; owner: string }[] = [];
+  for (const log of logs) {
+    const tokenId = log.args.agentId!;
+    try {
+      const currentOwner = await getIdentityOwnerOf(tokenId);
+      if (currentOwner === walletAddress.toLowerCase()) {
+        const tokenURI = (await client.readContract({
+          address: ERC8004_IDENTITY_REGISTRY as Hex,
+          abi: IDENTITY_REGISTRY_ABI,
+          functionName: "tokenURI",
+          args: [tokenId],
+        })) as string;
+        results.push({ tokenId, tokenURI, owner: currentOwner });
+      }
+    } catch {
+      // Token may not exist anymore, skip
+    }
   }
+  return results;
 }
+
+
 
 // ── Feedback ──
 

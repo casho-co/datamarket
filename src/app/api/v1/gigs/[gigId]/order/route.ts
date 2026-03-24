@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireScope } from "@/lib/auth/middleware";
+import { requireScope, requireOnChainIdentity } from "@/lib/auth/middleware";
 import { validatedRoute } from "@/lib/utils/validated-route";
 import { orderGigSchema } from "@/lib/validators";
 import { orderGig } from "@/lib/services/gig";
@@ -18,6 +18,9 @@ export const POST = validatedRoute(
 
     const { blocked: rl } = await checkRateLimit(auth.agentId, "sensitive");
     if (rl) return rl;
+
+    const gate = requireOnChainIdentity(auth);
+    if (gate) return gate;
 
     const nonce = getNonce(req);
     if (nonce) {

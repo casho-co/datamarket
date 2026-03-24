@@ -2,11 +2,7 @@ import { db } from "@/lib/db";
 import { agents, reputation, apiKeys } from "@/lib/db/schema";
 import { eq, ilike, or, desc, sql, and, type SQL } from "drizzle-orm";
 import { createApiKeyForAgent } from "@/lib/auth/api-key";
-import {
-  registerAgentOnChain,
-  setAgentWalletOnChain,
-  getOnChainReputation,
-} from "@/lib/bsc/erc8004";
+import { getOnChainReputation } from "@/lib/bsc/erc8004";
 import { DEFAULT_SCOPES } from "@/lib/auth/scopes";
 import { getAgentBalance } from "./wallet";
 import { initReputation, getTierForScore } from "./reputation";
@@ -17,35 +13,6 @@ const UUID_RE =
 function agentLookupCondition(identifier: string): SQL {
   if (UUID_RE.test(identifier)) return eq(agents.id, identifier);
   return eq(agents.handle, identifier);
-}
-
-// ── ERC-8004 On-Chain Registration Helper ──
-
-async function registerAndLinkOnChain(
-  handle: string | null | undefined,
-  walletAddress: string | null | undefined
-): Promise<bigint | null> {
-  try {
-    const baseUrl =
-      process.env.NEXT_PUBLIC_BASE_URL || "https://datalayer-market.fly.dev";
-    const identifier = handle || walletAddress || "agent";
-    const agentURI = `${baseUrl}/api/v1/agents/${identifier}`;
-    const erc8004AgentId = await registerAgentOnChain(agentURI);
-
-    // Link the agent's wallet address on-chain so other platforms can discover it
-    if (walletAddress && erc8004AgentId) {
-      try {
-        await setAgentWalletOnChain(erc8004AgentId, walletAddress);
-      } catch {
-        // setAgentWallet is best-effort — registration still succeeded
-      }
-    }
-
-    return erc8004AgentId;
-  } catch {
-    // On-chain registration may fail; continue with off-chain only
-    return null;
-  }
 }
 
 // ── Registration (Wallet-Only) ──
@@ -84,12 +51,6 @@ export async function registerAgent(params: {
     }
   }
 
-  // Register on-chain with ERC-8004 + link wallet (only after uniqueness checks pass)
-  const erc8004AgentId = await registerAndLinkOnChain(
-    params.handle,
-    params.walletAddress
-  );
-
   const [agent] = await db
     .insert(agents)
     .values({
@@ -102,7 +63,6 @@ export async function registerAgent(params: {
       actorType: params.actorType || "agent",
       webhookUrl: params.webhookUrl || null,
       mcpEndpoint: params.mcpEndpoint || null,
-      erc8004AgentId,
     })
     .returning();
 
@@ -119,7 +79,7 @@ export async function registerAgent(params: {
     apiKey: apiKeyResult.key,
     apiKeyPrefix: apiKeyResult.prefix,
     walletAddress: agent.walletAddress,
-    erc8004AgentId: erc8004AgentId?.toString() || null,
+    erc8004AgentId: null,
     handle: agent.handle,
   };
 }

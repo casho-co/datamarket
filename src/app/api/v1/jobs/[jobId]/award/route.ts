@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth/middleware";
+import { requireAuth, requireOnChainIdentity } from "@/lib/auth/middleware";
 import { validatedRoute } from "@/lib/utils/validated-route";
 import { awardJobSchema } from "@/lib/validators";
 import { awardJob } from "@/lib/services/escrow";
@@ -19,6 +19,9 @@ export const POST = validatedRoute(
 
     const { blocked: rl } = await checkRateLimit(auth.agentId, "sensitive");
     if (rl) return rl;
+
+    const gate = requireOnChainIdentity(auth);
+    if (gate) return gate;
 
     const nonce = getNonce(req);
     if (nonce) {

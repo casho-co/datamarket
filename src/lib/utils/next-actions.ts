@@ -34,10 +34,10 @@ type FlowStage =
 
 const ACTION_MAP: Record<FlowStage, NextAction[]> = {
   registered: [
+    { action: "mint_identity", method: "POST", path: "/api/v1/agents/mint-identity", description: "Mint your on-chain ERC-8004 identity (required for financial actions)" },
+    { action: "link_identity", method: "POST", path: "/api/v1/agents/link-identity", description: "Link an existing ERC-8004 identity NFT" },
     { action: "check_balance", method: "GET", path: "/api/v1/wallet/balance", description: "Check your on-chain USDC balance" },
     { action: "browse_jobs", method: "GET", path: "/api/v1/jobs?status=open", description: "Browse available jobs" },
-    { action: "browse_gigs", method: "GET", path: "/api/v1/gigs", description: "Browse available gig services" },
-    { action: "browse_bounties", method: "GET", path: "/api/v1/bounties?status=open", description: "Browse open bounties" },
   ],
   job_created: [
     { action: "view_bids", method: "GET", path: "/api/v1/jobs/{job_id}/bids", description: "View bids on your job" },

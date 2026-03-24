@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth/middleware";
+import { requireAuth, requireOnChainIdentity } from "@/lib/auth/middleware";
 import { checkRateLimit, withRateLimitHeaders } from "@/lib/middleware/rate-limit";
 import { buildCreateEscrowData } from "@/lib/bsc/escrow-contract";
 import { db } from "@/lib/db";
@@ -27,6 +27,9 @@ export async function POST(req: NextRequest) {
 
   const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "sensitive");
   if (rl) return rl;
+
+  const gate = requireOnChainIdentity(auth);
+  if (gate) return gate;
 
   if (!ESCROW_CONTRACT_ADDRESS) {
     return NextResponse.json(

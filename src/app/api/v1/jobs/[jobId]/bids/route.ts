@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth, notFound } from "@/lib/auth/middleware";
+import { requireAuth, notFound, requireOnChainIdentity } from "@/lib/auth/middleware";
 import { authenticateAgent } from "@/lib/auth/middleware";
 import { placeBid, listBidsForJob } from "@/lib/services/bid";
 import { getJobById } from "@/lib/services/job";
@@ -36,6 +36,9 @@ export async function POST(
 
   const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
+
+  const gate = requireOnChainIdentity(auth);
+  if (gate) return gate;
 
   const { jobId } = await params;
 

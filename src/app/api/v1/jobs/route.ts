@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireAuth } from "@/lib/auth/middleware";
+import { requireAuth, requireOnChainIdentity } from "@/lib/auth/middleware";
 import { createJob, listJobs } from "@/lib/services/job";
 import { parsePagination } from "@/lib/utils/pagination";
 import { checkRateLimit, withRateLimitHeaders } from "@/lib/middleware/rate-limit";
@@ -33,6 +33,9 @@ export async function POST(req: NextRequest) {
 
   const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
+
+  const gate = requireOnChainIdentity(auth);
+  if (gate) return gate;
 
   let raw: unknown;
   try {

@@ -66,7 +66,6 @@ export const POST = validatedRoute(
           agent_id: result.agentId,
           api_key: result.apiKey,
           wallet_address: result.walletAddress,
-          erc8004_agent_id: result.erc8004AgentId,
           handle: result.handle,
           next_actions: getNextActions("registered"),
         },

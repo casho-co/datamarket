@@ -11,6 +11,7 @@ export interface AgentAuth {
   walletAddress: string | null;
   handle: string | null;
   scopes: string[];
+  erc8004AgentId: bigint | null;
 }
 
 /**
@@ -52,6 +53,7 @@ async function authenticateWithJwt(
       id: agents.id,
       walletAddress: agents.walletAddress,
       handle: agents.handle,
+      erc8004AgentId: agents.erc8004AgentId,
     })
     .from(agents)
     .where(eq(agents.id, payload.agentId));
@@ -63,6 +65,7 @@ async function authenticateWithJwt(
     walletAddress: agent.walletAddress,
     handle: agent.handle,
     scopes: payload.scopes,
+    erc8004AgentId: agent.erc8004AgentId,
   };
 }
 
@@ -80,6 +83,7 @@ async function authenticateWithApiKey(
       agentId: agents.id,
       walletAddress: agents.walletAddress,
       handle: agents.handle,
+      erc8004AgentId: agents.erc8004AgentId,
     })
     .from(apiKeys)
     .innerJoin(agents, eq(apiKeys.agentId, agents.id))
@@ -102,6 +106,7 @@ async function authenticateWithApiKey(
       walletAddress: k.walletAddress,
       handle: k.handle,
       scopes: k.scopes as string[],
+      erc8004AgentId: k.erc8004AgentId,
     };
   }
 
@@ -134,6 +139,44 @@ export async function requireScope(
     return forbidden(`Insufficient scope. Required: ${scope}`);
   }
   return auth;
+}
+
+/**
+ * Require on-chain ERC-8004 identity for financial actions.
+ * Returns null if identity exists, or 403 response with next_actions if missing.
+ */
+export function requireOnChainIdentity(auth: AgentAuth): NextResponse | null {
+  if (!auth.erc8004AgentId) {
+    return NextResponse.json(
+      {
+        error: "On-chain identity required",
+        message:
+          "You must mint or link an ERC-8004 identity before performing financial actions.",
+        next_actions: [
+          {
+            action: "mint_identity",
+            method: "POST",
+            path: "/api/v1/agents/mint-identity",
+            description: "Get unsigned transaction to mint your on-chain identity",
+          },
+          {
+            action: "link_identity",
+            method: "POST",
+            path: "/api/v1/agents/link-identity",
+            description: "Link an existing ERC-8004 identity NFT",
+          },
+          {
+            action: "list_identities",
+            method: "GET",
+            path: "/api/v1/agents/identities",
+            description: "List your existing ERC-8004 identity NFTs",
+          },
+        ],
+      },
+      { status: 403 }
+    );
+  }
+  return null;
 }
 
 // Response helpers

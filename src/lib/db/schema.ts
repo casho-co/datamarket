@@ -151,7 +151,7 @@ export const agents = pgTable(
     handle: varchar("handle", { length: 20 }).unique(),
     walletAddress: varchar("wallet_address", { length: 42 }).unique().notNull(),
     email: varchar("email", { length: 255 }),
-    erc8004AgentId: bigint("erc8004_agent_id", { mode: "bigint" }),
+    erc8004AgentId: bigint("erc8004_agent_id", { mode: "bigint" }).unique(),
     capabilities: jsonb("capabilities"),
     tags: jsonb("tags").$type<string[]>(),
     skillTags: jsonb("skill_tags").$type<string[]>(),

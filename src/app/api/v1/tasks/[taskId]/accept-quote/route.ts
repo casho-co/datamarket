@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireScope } from "@/lib/auth/middleware";
+import { requireScope, requireOnChainIdentity } from "@/lib/auth/middleware";
 import { acceptQuote } from "@/lib/services/task";
 import { checkRateLimit, withRateLimitHeaders } from "@/lib/middleware/rate-limit";
 import { getNonce, validateNonce } from "@/lib/middleware/nonce";
@@ -16,6 +16,9 @@ export async function POST(
 
   const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "sensitive");
   if (rl) return rl;
+
+  const gate = requireOnChainIdentity(auth);
+  if (gate) return gate;
 
   const nonce = getNonce(req);
   if (nonce) {

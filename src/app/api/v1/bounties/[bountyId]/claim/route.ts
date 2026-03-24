@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { requireScope } from "@/lib/auth/middleware";
+import { requireScope, requireOnChainIdentity } from "@/lib/auth/middleware";
 import { claimBounty } from "@/lib/services/bounty";
 import { checkRateLimit, withRateLimitHeaders } from "@/lib/middleware/rate-limit";
 import { logAudit, getClientIp } from "@/lib/services/audit";
@@ -17,6 +17,9 @@ export async function POST(
 
   const { blocked: rl, headers: rlHeaders } = await checkRateLimit(auth.agentId, "api");
   if (rl) return rl;
+
+  const gate = requireOnChainIdentity(auth);
+  if (gate) return gate;
 
   const { bountyId } = await params;
 
