@@ -4,7 +4,7 @@ import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/components/providers/auth-context";
-import { useWriteContract, useWaitForTransactionReceipt, useAccount, useSendTransaction } from "wagmi";
+import { useWaitForTransactionReceipt, useAccount, useSendTransaction } from "wagmi";
 
 const deadlineOptions = [
   { label: "1 hour", value: 3600 },
