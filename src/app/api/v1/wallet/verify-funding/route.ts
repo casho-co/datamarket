@@ -4,7 +4,7 @@ import { checkRateLimit } from "@/lib/middleware/rate-limit";
 import { getNonce, validateNonce } from "@/lib/middleware/nonce";
 import { logAudit, getClientIp } from "@/lib/services/audit";
 import { withTransaction } from "@/lib/db";
-import { jobs, escrows, agents, reputation } from "@/lib/db/schema";
+import { jobs, escrows, reputation } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { getOnChainEscrow, parseTokenAmount } from "@/lib/bsc/escrow-contract";
 import { getPublicClient } from "@/lib/bsc/client";
@@ -52,17 +52,47 @@ export async function POST(req: NextRequest) {
   }
 
   const { tx_hash, job_id } = body;
+  const walletAddress = auth.walletAddress;
 
-  await logAudit({
-    agentId: auth.agentId,
-    action: "verify_funding",
-    resourceType: "wallet",
-    resourceId: auth.agentId,
-    metadata: { txHash: tx_hash, jobId: job_id },
-    ipAddress: getClientIp(req),
-  });
+  if (!walletAddress) {
+    return NextResponse.json({ error: "Agent has no wallet address" }, { status: 400 });
+  }
 
   try {
+    // ── On-chain reads BEFORE the transaction (no DB lock held) ──
+
+    const publicClient = getPublicClient();
+    let receipt;
+    try {
+      receipt = await publicClient.getTransactionReceipt({ hash: tx_hash as Hex });
+    } catch {
+      return NextResponse.json({ error: "Transaction not found on-chain" }, { status: 400 });
+    }
+
+    if (receipt.status !== "success") {
+      return NextResponse.json({ error: "Transaction failed on-chain" }, { status: 400 });
+    }
+    if (!receipt.to || receipt.to.toLowerCase() !== ESCROW_CONTRACT_ADDRESS.toLowerCase()) {
+      return NextResponse.json({ error: "Transaction does not target the escrow contract" }, { status: 400 });
+    }
+    if (receipt.from.toLowerCase() !== walletAddress.toLowerCase()) {
+      return NextResponse.json({ error: "Transaction sender does not match your wallet" }, { status: 403 });
+    }
+
+    const onChainEscrow = await getOnChainEscrow(job_id);
+
+    if (onChainEscrow.state !== 1) {
+      return NextResponse.json({ error: "On-chain escrow not in FUNDED state" }, { status: 400 });
+    }
+    if (onChainEscrow.buyer.toLowerCase() !== walletAddress.toLowerCase()) {
+      return NextResponse.json({ error: "On-chain buyer does not match your wallet" }, { status: 403 });
+    }
+    if (onChainEscrow.seller.toLowerCase() !== ZERO_ADDRESS) {
+      return NextResponse.json({ error: "On-chain escrow already has a seller assigned" }, { status: 400 });
+    }
+
+    // ── Short DB transaction — only DB reads/writes, no RPC calls ──
+
     const result = await withTransaction(async (tx) => {
       // 1. Lock the job row — prevents concurrent verify-funding calls
       const [job] = await tx
@@ -80,12 +110,17 @@ export async function POST(req: NextRequest) {
         return { job_id, status: "verified", message: "Job already verified" } as const;
       }
 
-      // 3. Verify the caller is the job creator
+      // 3. Job must be open
+      if (job.status !== "open") {
+        return { error: "Job is not open", httpStatus: 409 } as const;
+      }
+
+      // 4. Verify the caller is the job creator
       if (job.creatorAgentId !== auth.agentId) {
         return { error: "Not job creator", httpStatus: 403 } as const;
       }
 
-      // 4. Dedup: ensure no escrow already exists with this tx hash
+      // 5. Dedup: ensure no escrow already exists with this tx hash
       const [existingEscrow] = await tx
         .select({ id: escrows.id })
         .from(escrows)
@@ -94,59 +129,13 @@ export async function POST(req: NextRequest) {
         return { error: "Transaction already used for another escrow", httpStatus: 409 } as const;
       }
 
-      // 5. Fetch agent wallet address
-      const [agent] = await tx
-        .select({ walletAddress: agents.walletAddress })
-        .from(agents)
-        .where(eq(agents.id, auth.agentId));
-
-      if (!agent?.walletAddress) {
-        return { error: "Agent has no wallet address", httpStatus: 400 } as const;
-      }
-
-      // 6. Verify tx_hash on-chain
-      const publicClient = getPublicClient();
-      let receipt;
-      try {
-        receipt = await publicClient.getTransactionReceipt({ hash: tx_hash as Hex });
-      } catch {
-        return { error: "Transaction not found on-chain", httpStatus: 400 } as const;
-      }
-      if (receipt.status !== "success") {
-        return { error: "Transaction failed on-chain", httpStatus: 400 } as const;
-      }
-      if (receipt.to?.toLowerCase() !== ESCROW_CONTRACT_ADDRESS.toLowerCase()) {
-        return { error: "Transaction does not target escrow contract", httpStatus: 400 } as const;
-      }
-      if (receipt.from.toLowerCase() !== agent.walletAddress.toLowerCase()) {
-        return { error: "Transaction sender does not match your wallet", httpStatus: 403 } as const;
-      }
-
-      // 7. Read on-chain escrow state to verify
-      const onChainEscrow = await getOnChainEscrow(job_id);
-
-      // State 1 = FUNDED
-      if (onChainEscrow.state !== 1) {
-        return { error: "On-chain escrow not in FUNDED state", httpStatus: 400 } as const;
-      }
-
-      // Verify buyer matches agent's wallet
-      if (onChainEscrow.buyer.toLowerCase() !== agent.walletAddress.toLowerCase()) {
-        return { error: "On-chain buyer does not match your wallet", httpStatus: 403 } as const;
-      }
-
-      // Verify amount matches budget (exact match in wei)
+      // 6. Verify amount matches budget (exact match in wei)
       if (!job.budgetAmount) {
         return { error: "Job has no budget set", httpStatus: 400 } as const;
       }
       const expectedWei = parseTokenAmount(job.budgetAmount, "USDC");
       if (onChainEscrow.amount !== expectedWei) {
         return { error: "On-chain amount does not match job budget", httpStatus: 400 } as const;
-      }
-
-      // Verify seller is address(0) — not yet assigned
-      if (onChainEscrow.seller.toLowerCase() !== ZERO_ADDRESS) {
-        return { error: "On-chain escrow already has a seller assigned", httpStatus: 400 } as const;
       }
 
       // 7. All checks pass — create escrow DB row
@@ -160,7 +149,7 @@ export async function POST(req: NextRequest) {
         onChainTxHash: tx_hash,
       });
 
-      // 8. NOW set verified=true — only after all checks pass
+      // 8. Set verified=true
       await tx
         .update(jobs)
         .set({ verified: true, updatedAt: new Date() })
@@ -174,6 +163,16 @@ export async function POST(req: NextRequest) {
           updatedAt: new Date(),
         })
         .where(eq(reputation.agentId, auth.agentId));
+
+      // 10. Audit log (after ownership verified)
+      await logAudit({
+        agentId: auth.agentId,
+        action: "verify_funding",
+        resourceType: "job",
+        resourceId: job_id,
+        metadata: { txHash: tx_hash },
+        ipAddress: getClientIp(req),
+      });
 
       return {
         job_id,
@@ -196,7 +195,7 @@ export async function POST(req: NextRequest) {
 
     // Emit feed event outside the transaction (non-critical)
     if ("_emitFeed" in result && result._emitFeed) {
-      await emitFeedEvent("job_created", job_id, {
+      await emitFeedEvent("job_funded", job_id, {
         job_id,
         title: result._jobTitle,
         creator_agent_id: auth.agentId,

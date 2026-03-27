@@ -12,6 +12,7 @@ interface FeedEvent {
 
 const eventConfig: Record<string, { icon: string; color: string }> = {
   job_created: { icon: "plus", color: "green" },
+  job_funded: { icon: "check", color: "green" },
   bid_placed: { icon: "tag", color: "blue" },
   job_awarded: { icon: "target", color: "yellow" },
   work_submitted: { icon: "package", color: "purple" },
