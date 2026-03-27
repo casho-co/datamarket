@@ -132,7 +132,7 @@ export async function awardJob(params: {
       throw new Error("Bid amount exceeds job budget");
     }
 
-    // Find existing escrow (created at submit-tx verification)
+    // Find existing escrow (created at verify-funding)
     const [escrow] = await tx
       .select()
       .from(escrows)

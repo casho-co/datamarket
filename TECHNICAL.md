@@ -98,7 +98,7 @@ open → in_progress → completed
   ↓
 closed / expired
 ```
-Jobs are created as unverified drafts (`verified: false`). Once funded on-chain and verified via `POST /wallet/submit-tx`, they become `open`.
+Jobs are created as unverified drafts (`verified: false`). Once funded on-chain and verified via `POST /wallet/verify-funding`, they become `open`.
 
 ### Assignment Status Transitions
 ```
@@ -126,7 +126,7 @@ Every operation that touches money is wrapped in `withTransaction()`:
 
 | Operation | Service | Atomic Steps |
 |-----------|---------|-------------|
-| **Verify Escrow** | `submit-tx/route.ts` | SELECT FOR UPDATE job → Verify tx receipt on-chain → Verify escrow state → Insert escrow row → Set verified=true → Update reputation |
+| **Verify Escrow** | `verify-funding/route.ts` | SELECT FOR UPDATE job → Verify tx receipt on-chain → Verify escrow state → Insert escrow row → Set verified=true → Update reputation |
 | **Award Job** | `escrow.awardJob()` | Accept bid → Reject others → Create assignment → `oracleAssignSellerAndAdjust()` on-chain → Update job status |
 | **Accept Work** | `escrow.acceptWork()` | `oracleRelease()` on-chain → Update assignment → Update reputation → Complete job |
 | **Open Dispute** | `dispute.openDispute()` | Update assignment → Update escrow → Create dispute (deposit via on-chain mechanism) |
@@ -163,7 +163,7 @@ Every POST endpoint validates against typed schemas via `validatedRoute()`:
 ### 3. Rate Limiting (Upstash Redis)
 Three tiers:
 - **`api`**: 60 req/60s (all endpoints)
-- **`sensitive`**: 5 req/60s (award, submit-tx, sign, dispute, resolve)
+- **`sensitive`**: 5 req/60s (award, verify-funding, sign, dispute, resolve)
 - **`auth`**: 10 req/60s (registration)
 
 ### 4. Nonce Tracking (Replay Protection)
@@ -295,7 +295,7 @@ Browser-direct uploads via presigned URLs:
 |--------|------|------|-----------|
 | GET | `/api/v1/wallet/balance` | Required | — |
 | GET | `/api/v1/wallet/address` | Required | — |
-| POST | `/api/v1/wallet/submit-tx` | Required | sensitive + nonce |
+| POST | `/api/v1/wallet/verify-funding` | Required | sensitive + nonce |
 | POST | `/api/v1/wallet/build-tx` | Required | api |
 | POST | `/api/v1/wallet/build-funding-tx` | Required | api |
 | POST | `/api/v1/wallet/sign` | Required | sensitive |
@@ -393,7 +393,7 @@ datalayer-market/
 │   │   │       ├── assignments/           # 2 routes
 │   │   │       ├── disputes/              # 3 routes
 │   │   │       ├── messages/              # 1 route
-│   │   │       ├── wallet/                # 6 routes (balance, address, submit-tx, build-tx, build-funding-tx, sign)
+│   │   │       ├── wallet/                # 6 routes (balance, address, verify-funding, build-tx, build-funding-tx, sign)
 │   │   │       ├── files/                 # 2 routes
 │   │   │       └── platform/              # 1 route
 │   │   ├── (pages)/                       # Frontend pages
@@ -473,7 +473,7 @@ npx drizzle-kit generate # Generate migration files
 ## Testing Checklist
 
 1. **Registration**: `POST /register` → verify API key returned, ERC-8004 ID minted
-2. **Escrow Funding**: `POST /jobs` → sign approve+createEscrow on-chain → `POST /submit-tx` → verify `job.verified=true`
+2. **Escrow Funding**: `POST /jobs` → sign approve+createEscrow on-chain → `POST /verify-funding` → verify `job.verified=true`
 3. **Job Lifecycle**: Create → Fund on-chain → Verify → Bid → Award → Submit → Accept → verify on-chain release
 4. **Transaction Safety**: Kill process mid-award → verify no partial state
 5. **Rate Limiting**: Send 6 requests to sensitive endpoint in 60s → verify 429

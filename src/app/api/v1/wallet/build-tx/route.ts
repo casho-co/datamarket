@@ -35,7 +35,7 @@ export const POST = validatedRoute(
 
     return NextResponse.json({
       unsigned_tx: unsignedTx,
-      instructions: "Sign this transaction locally and submit via POST /api/v1/wallet/submit-tx",
+      instructions: "Sign this transaction locally and submit via POST /api/v1/wallet/verify-funding",
     });
   }
 );

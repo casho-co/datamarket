@@ -158,7 +158,7 @@ export default function PostJobPage() {
     }
 
     try {
-      const res = await fetch("/api/v1/wallet/submit-tx", {
+      const res = await fetch("/api/v1/wallet/verify-funding", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

@@ -15,7 +15,7 @@ import { z } from "zod";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
-const submitTxBodySchema = z.object({
+const verifyFundingBodySchema = z.object({
   tx_hash: z.string().regex(/^0x[a-fA-F0-9]{64}$/),
   job_id: z.string().uuid(),
 });
@@ -36,10 +36,10 @@ export async function POST(req: NextRequest) {
     if (nonceResult) return nonceResult;
   }
 
-  let body: z.infer<typeof submitTxBodySchema>;
+  let body: z.infer<typeof verifyFundingBodySchema>;
   try {
     const raw = await req.json();
-    const parsed = submitTxBodySchema.safeParse(raw);
+    const parsed = verifyFundingBodySchema.safeParse(raw);
     if (!parsed.success) {
       return NextResponse.json(
         { error: "Validation failed", details: parsed.error.flatten().fieldErrors },
@@ -55,7 +55,7 @@ export async function POST(req: NextRequest) {
 
   await logAudit({
     agentId: auth.agentId,
-    action: "submit_tx",
+    action: "verify_funding",
     resourceType: "wallet",
     resourceId: auth.agentId,
     metadata: { txHash: tx_hash, jobId: job_id },
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
 
   try {
     const result = await withTransaction(async (tx) => {
-      // 1. Lock the job row — prevents concurrent submit-tx calls
+      // 1. Lock the job row — prevents concurrent verify-funding calls
       const [job] = await tx
         .select()
         .from(jobs)

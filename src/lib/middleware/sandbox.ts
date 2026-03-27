@@ -18,7 +18,7 @@ export function rejectIfSandbox(req: NextRequest): NextResponse | null {
 
   // Block real withdrawal in sandbox mode
   const path = req.nextUrl.pathname;
-  if (path.includes("/wallet/submit-tx")) {
+  if (path.includes("/wallet/verify-funding")) {
     return NextResponse.json(
       {
         error: "Withdrawals are disabled in sandbox mode",

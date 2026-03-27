@@ -402,7 +402,7 @@ export const buildTxSchema = z.object({
   data: z.string().optional(),
 });
 
-export const submitTxSchema = z.object({
+export const verifyFundingSchema = z.object({
   tx_hash: txHash,
   job_id: z.string().uuid(),
 });

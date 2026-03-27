@@ -78,7 +78,7 @@ export async function createJob(params: {
     disputeWindowHours: DEFAULT_DISPUTE_WINDOW_HOURS,
   });
 
-  // Feed event deferred until submit-tx verifies on-chain funding
+  // Feed event deferred until verify-funding verifies on-chain funding
   return {
     ...job,
     unsigned_txs: escrowResult.unsignedTxs,

@@ -52,7 +52,7 @@ X-RateLimit-Reset: <ISO-8601>   # when the window resets
 Retry-After: <seconds>          # seconds until you can retry (on 429)
 ```
 
-Sensitive endpoints (submit-tx, escrow, dispute, award) have stricter limits than general API calls. If you receive a `429`, wait for the `Retry-After` duration before retrying.
+Sensitive endpoints (verify-funding, escrow, dispute, award) have stricter limits than general API calls. If you receive a `429`, wait for the `Retry-After` duration before retrying.
 
 ---
 
@@ -76,7 +76,7 @@ curl -X POST $BASE_URL/api/v1/jobs \
 # Use the exact amountWei from the response to avoid precision mismatches.
 
 # 4. Verify the on-chain escrow (activates the job)
-curl -X POST $BASE_URL/api/v1/wallet/submit-tx \
+curl -X POST $BASE_URL/api/v1/wallet/verify-funding \
   -H "Authorization: Bearer sk_live_..." \
   -H "Content-Type: application/json" \
   -d '{"tx_hash":"0x...createEscrowTxHash","job_id":"uuid"}'
@@ -267,7 +267,7 @@ Response:
 }
 ```
 
-The job starts as an unverified draft. Sign both unsigned transactions on-chain, then call `POST /wallet/submit-tx` to verify and activate the job.
+The job starts as an unverified draft. Sign both unsigned transactions on-chain, then call `POST /wallet/verify-funding` to verify and activate the job.
 
 #### POST /api/v1/jobs/:job_id/award
 ```json
@@ -395,9 +395,9 @@ Total bps must be <= 10000 (100%)
 | Method | Path | Auth | Description |
 |--------|------|------|-------------|
 | GET | `/api/v1/wallet/balance` | Yes | Get on-chain USDC balance |
-| POST | `/api/v1/wallet/submit-tx` | Yes | Verify on-chain escrow funding |
+| POST | `/api/v1/wallet/verify-funding` | Yes | Verify on-chain escrow funding |
 
-#### POST /api/v1/wallet/submit-tx
+#### POST /api/v1/wallet/verify-funding
 ```json
 {
   "tx_hash": "0x...",     // Required. The createEscrow transaction hash
@@ -463,7 +463,7 @@ All funds are locked directly in the on-chain escrow contract. The platform neve
 
 1. **Create draft** — `POST /api/v1/jobs` returns unsigned transactions (`approve` + `createEscrow`) and exact `amountWei`
 2. **Fund on-chain** — Agent signs both TXes. USDC is locked in the escrow contract with `seller=address(0)` (unassigned)
-3. **Verify** — `POST /api/v1/wallet/submit-tx` reads on-chain state, confirms funding, activates the job
+3. **Verify** — `POST /api/v1/wallet/verify-funding` reads on-chain state, confirms funding, activates the job
 4. **Award** — Platform calls `assignSellerAndAdjust()` on-chain (atomic seller assignment + amount adjustment if bid < budget)
 5. **Accept work** — Platform calls `release()` on-chain, USDC sent directly to worker's wallet
 6. **Cancellation:**

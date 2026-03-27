@@ -281,7 +281,7 @@ export function generateOpenAPISpec() {
       "/wallet/build-tx": {
         post: endpoint("Wallet", "Build unsigned tx (non-custodial)", { body: ref("BuildTxRequest"), response: ref("BuildTxResponse") }),
       },
-      "/wallet/submit-tx": {
+      "/wallet/verify-funding": {
         post: endpoint("Wallet", "Submit signed tx (non-custodial)", { body: ref("SubmitTxRequest"), response: ref("SubmitTxResponse") }),
       },
 
