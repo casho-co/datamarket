@@ -1,13 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getJobById, cancelJob } from "@/lib/services/job";
-import { requireAuth, notFound } from "@/lib/auth/middleware";
+import { requireAuth, notFound, authenticateAgent } from "@/lib/auth/middleware";
+import { checkRateLimit } from "@/lib/middleware/rate-limit";
+import { getClientIp } from "@/lib/services/audit";
 
 export async function GET(
-  _req: NextRequest,
+  req: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
 ) {
+  const ip = getClientIp(req) || "unknown";
+  const { blocked: rl } = await checkRateLimit(`ip:${ip}`, "api");
+  if (rl) return rl;
+
   const { jobId } = await params;
-  const job = await getJobById(jobId);
+  // Optional auth — if logged in, viewer sees full assignment details
+  const auth = await authenticateAgent(req);
+  const job = await getJobById(jobId, auth?.agentId || null);
   if (!job) return notFound("Job not found");
   return NextResponse.json(job);
 }

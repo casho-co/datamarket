@@ -86,29 +86,45 @@ export async function createJob(params: {
   };
 }
 
-export async function getJobById(jobId: string) {
+export async function getJobById(jobId: string, viewerAgentId?: string | null) {
   const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
   if (!job) return null;
 
-  const [creator] = await db
-    .select({ id: agents.id, handle: agents.handle, walletAddress: agents.walletAddress })
-    .from(agents)
-    .where(eq(agents.id, job.creatorAgentId));
+  const [[creator], jobAssignments, bidCount] = await Promise.all([
+    db
+      .select({ id: agents.id, handle: agents.handle, walletAddress: agents.walletAddress })
+      .from(agents)
+      .where(eq(agents.id, job.creatorAgentId)),
+    db
+      .select()
+      .from(assignments)
+      .where(eq(assignments.jobId, jobId)),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(bids)
+      .where(eq(bids.jobId, jobId)),
+  ]);
 
-  const jobAssignments = await db
-    .select()
-    .from(assignments)
-    .where(eq(assignments.jobId, jobId));
-
-  const bidCount = await db
-    .select({ count: sql<number>`count(*)::int` })
-    .from(bids)
-    .where(eq(bids.jobId, jobId));
+  // Strip private deliverable fields for public viewers
+  const isCreator = viewerAgentId === job.creatorAgentId;
+  const sanitizedAssignments = jobAssignments.map((a) => {
+    const isWorker = viewerAgentId === a.workerAgentId;
+    if (isCreator || isWorker) return a;
+    // Public view: only safe fields
+    return {
+      id: a.id,
+      workerAgentId: a.workerAgentId,
+      status: a.status,
+      escrowAmount: a.escrowAmount,
+      submittedAt: a.submittedAt,
+      revisionCount: a.revisionCount,
+    };
+  });
 
   return {
     ...job,
     creator,
-    assignments: jobAssignments,
+    assignments: sanitizedAssignments,
     bidCount: bidCount[0]?.count || 0,
   };
 }
@@ -144,6 +160,9 @@ export async function listJobs(params: {
     .leftJoin(agents, eq(jobs.creatorAgentId, agents.id))
     .$dynamic();
 
+  const validStatuses = ["open", "in_progress", "completed", "closed", "expired", "judging"] as const;
+  const validJobTypes = ["standard", "competition"] as const;
+
   const conditions = [];
 
   // Public queries only see verified jobs; creator's own queries see all
@@ -151,20 +170,21 @@ export async function listJobs(params: {
     conditions.push(eq(jobs.verified, true));
   }
 
-  if (params.status) {
-    conditions.push(eq(jobs.status, params.status as any));
+  if (params.status && validStatuses.includes(params.status as any)) {
+    conditions.push(eq(jobs.status, params.status as (typeof validStatuses)[number]));
   }
-  if (params.jobType) {
-    conditions.push(eq(jobs.jobType, params.jobType as any));
+  if (params.jobType && validJobTypes.includes(params.jobType as any)) {
+    conditions.push(eq(jobs.jobType, params.jobType as (typeof validJobTypes)[number]));
   }
   if (params.creatorAgentId) {
     conditions.push(eq(jobs.creatorAgentId, params.creatorAgentId));
   }
   if (params.search) {
+    const escaped = params.search.replace(/%/g, "\\%").replace(/_/g, "\\_");
     conditions.push(
       or(
-        ilike(jobs.title, `%${params.search}%`),
-        ilike(jobs.description, `%${params.search}%`)
+        ilike(jobs.title, `%${escaped}%`),
+        ilike(jobs.description, `%${escaped}%`)
       )
     );
   }
@@ -182,7 +202,18 @@ export async function listJobs(params: {
           ? asc(jobs.createdAt)
           : desc(jobs.createdAt);
 
-  return query.orderBy(orderBy).limit(params.limit).offset(params.offset);
+  // Run data query and count query in parallel
+  const whereClause = conditions.length > 0 ? and(...conditions) : undefined;
+
+  const [data, countResult] = await Promise.all([
+    query.orderBy(orderBy).limit(params.limit).offset(params.offset),
+    db
+      .select({ count: sql<number>`count(*)::int` })
+      .from(jobs)
+      .where(whereClause),
+  ]);
+
+  return { data, total: countResult[0]?.count || 0 };
 }
 
 export async function updateJobStatus(

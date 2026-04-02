@@ -10,6 +10,11 @@ import { safeErrorMessage } from "@/lib/utils/safe-error";
 import { deliverWebhook } from "@/lib/services/webhook";
 
 export async function GET(req: NextRequest) {
+  // Rate limit by IP for public endpoint
+  const ip = getClientIp(req) || "unknown";
+  const { blocked: rl } = await checkRateLimit(`ip:${ip}`, "api");
+  if (rl) return rl;
+
   const sp = req.nextUrl.searchParams;
   const { limit, offset } = parsePagination(sp);
 

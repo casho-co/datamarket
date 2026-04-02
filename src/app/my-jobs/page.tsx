@@ -37,7 +37,8 @@ export default function MyJobsPage() {
           }
         );
         if (res.ok) {
-          setJobs(await res.json());
+          const result = await res.json();
+          setJobs(result.data || result);
         } else {
           setError("Failed to load jobs");
         }

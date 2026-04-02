@@ -8,7 +8,7 @@ async function getJobs(searchParams: Record<string, string>) {
   const res = await fetch(`${baseUrl}/api/v1/jobs?${params}`, {
     cache: "no-store",
   });
-  if (!res.ok) return [];
+  if (!res.ok) return { data: [], total: 0 };
   return res.json();
 }
 
@@ -50,7 +50,7 @@ export default async function JobsPage({
   searchParams: Promise<Record<string, string>>;
 }) {
   const sp = await searchParams;
-  const jobs = await getJobs(sp);
+  const { data: jobs, total } = await getJobs(sp);
 
   return (
     <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6">

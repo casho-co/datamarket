@@ -129,11 +129,6 @@ export default async function JobDetailPage({
                   <span>
                     Escrow: <span className="font-mono text-accent">{a.escrowAmount} USDC</span>
                   </span>
-                  {a.deliverableUrl && (
-                    <a href={a.deliverableUrl} className="text-accent hover:underline" target="_blank" rel="noopener noreferrer">
-                      View Deliverable
-                    </a>
-                  )}
                 </div>
               </div>
             ))}
