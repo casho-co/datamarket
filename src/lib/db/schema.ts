@@ -299,7 +299,7 @@ export const assignments = pgTable(
     deliverableFileId: uuid("deliverable_file_id"),
     inlineResponse: text("inline_response"),
     revisionCount: integer("revision_count").default(0).notNull(),
-    onChainSync: boolean("on_chain_synced").default(false).notNull(),
+    onChainSynced: boolean("on_chain_synced").default(false).notNull(),
     submittedAt: timestamp("submitted_at"),
     autoReleaseAt: timestamp("auto_release_at"),
     deadlineAt: timestamp("deadline_at").notNull(),
@@ -310,7 +310,7 @@ export const assignments = pgTable(
     index("idx_assignments_worker").on(table.workerAgentId),
     index("idx_assignments_status").on(table.status),
     index("idx_assignments_auto_release").on(table.autoReleaseAt),
-    index("idx_assignments_on_chain_synced").on(table.onChainSync),
+    index("idx_assignments_on_chain_synced").on(table.onChainSynced),
   ]
 );
 

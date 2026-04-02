@@ -161,7 +161,7 @@ export async function awardJob(params: {
       .set({ status: "rejected" })
       .where(and(eq(bids.jobId, params.jobId), eq(bids.status, "pending")));
 
-    // Create assignment (onChainSync = false until on-chain call succeeds)
+    // Create assignment (onChainSynced = false until on-chain call succeeds)
     const deadlineAt = new Date(
       Date.now() + (bid.etaSeconds + 86400) * 1000
     );
@@ -209,7 +209,7 @@ export async function awardJob(params: {
   });
 
   // ── On-chain call AFTER transaction — track sync status ──
-  let onChainSync = false;
+  let onChainSynced = false;
   if (ESCROW_CONTRACT_ADDRESS && result.walletAddress) {
     try {
       if (result.parsedAmount < result.parsedBudget) {
@@ -221,7 +221,7 @@ export async function awardJob(params: {
       } else {
         await oracleAssignSeller(params.jobId, result.walletAddress);
       }
-      onChainSync = true;
+      onChainSynced = true;
     } catch (err) {
       console.error(
         `[awardJob] On-chain assignSeller failed for job ${params.jobId}:`,
@@ -231,10 +231,10 @@ export async function awardJob(params: {
   }
 
   // Update sync status
-  if (onChainSync) {
+  if (onChainSynced) {
     await db
       .update(assignments)
-      .set({ onChainSync: true })
+      .set({ onChainSynced: true })
       .where(eq(assignments.id, result.assignment.id));
   }
 
@@ -252,9 +252,9 @@ export async function awardJob(params: {
     .where(eq(escrows.id, result.escrowId));
 
   return {
-    assignment: { ...result.assignment, onChainSync },
+    assignment: { ...result.assignment, onChainSynced },
     escrow: updatedEscrow,
-    on_chain_status: onChainSync ? "synced" : "pending",
+    on_chain_status: onChainSynced ? "synced" : "pending",
   };
 }
 
@@ -389,7 +389,7 @@ export async function acceptWork(params: {
 
     // Block release if on-chain seller not yet assigned
     for (const a of submittedAssignments) {
-      if (!a.onChainSync) {
+      if (!a.onChainSynced) {
         throw new Error(
           `Assignment ${a.id} is not synced on-chain. The seller has not been assigned on the escrow contract yet. Please retry shortly.`
         );

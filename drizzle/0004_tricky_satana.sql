@@ -1,0 +1,2 @@
+ALTER TABLE "assignments" ADD COLUMN "on_chain_synced" boolean DEFAULT false NOT NULL;--> statement-breakpoint
+CREATE INDEX "idx_assignments_on_chain_synced" ON "assignments" USING btree ("on_chain_synced");

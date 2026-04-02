@@ -8,7 +8,7 @@ import {
 import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
 
 /**
- * Retry on-chain oracleAssignSeller for assignments where onChainSync = false.
+ * Retry on-chain oracleAssignSeller for assignments where onChainSynced = false.
  * These are jobs that were awarded in DB but the on-chain seller assignment failed.
  */
 export async function runSellerAssignmentRetry() {
@@ -24,7 +24,7 @@ export async function runSellerAssignmentRetry() {
     .from(assignments)
     .where(
       and(
-        eq(assignments.onChainSync, false),
+        eq(assignments.onChainSynced, false),
         eq(assignments.status, "in_progress")
       )
     );
@@ -70,7 +70,7 @@ export async function runSellerAssignmentRetry() {
 
       await db
         .update(assignments)
-        .set({ onChainSync: true })
+        .set({ onChainSynced: true })
         .where(eq(assignments.id, assignment.id));
 
       synced++;

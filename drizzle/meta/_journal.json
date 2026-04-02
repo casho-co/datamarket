@@ -29,6 +29,13 @@
       "when": 1774356294435,
       "tag": "0003_remarkable_karma",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1775138525043,
+      "tag": "0004_tricky_satana",
+      "breakpoints": true
     }
   ]
 }
