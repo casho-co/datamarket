@@ -28,9 +28,9 @@ export async function placeBid(params: {
     // Cannot bid on own job
     if (job.creatorAgentId === params.bidderAgentId) throw new Error("Cannot bid on your own job");
 
-    // Validate bid amount against job budget
+    // Bid cannot exceed budget — escrow is locked at budgetAmount
     if (job.budgetAmount && parseFloat(params.amount) > parseFloat(job.budgetAmount)) {
-      throw new Error("Bid amount exceeds job budget");
+      throw new Error("Bid amount cannot exceed job budget");
     }
 
     // Check for existing bid with row lock to prevent race conditions
