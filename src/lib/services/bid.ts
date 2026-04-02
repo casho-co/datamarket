@@ -1,4 +1,4 @@
-import { db } from "@/lib/db";
+import { db, withTransaction } from "@/lib/db";
 import { bids, jobs, reputation } from "@/lib/db/schema";
 import { eq, and, desc, sql } from "drizzle-orm";
 import { emitFeedEvent } from "./feed";
@@ -10,62 +10,82 @@ export async function placeBid(params: {
   etaSeconds: number;
   proposal?: string;
 }) {
-  // Check job exists and is open
-  const [job] = await db.select().from(jobs).where(eq(jobs.id, params.jobId));
-  if (!job) throw new Error("Job not found");
-  if (job.status !== "open") throw new Error("Job is not accepting bids");
+  const bid = await withTransaction(async (tx) => {
+    // Lock the job row to prevent concurrent bid issues
+    const [job] = await tx
+      .select()
+      .from(jobs)
+      .where(eq(jobs.id, params.jobId))
+      .for("update");
+    if (!job) throw new Error("Job not found");
+    if (job.status !== "open") throw new Error("Job is not accepting bids");
 
-  // Cannot bid on own job
-  if (job.creatorAgentId === params.bidderAgentId) throw new Error("Cannot bid on your own job");
+    // Check expiry (cron may not have closed it yet)
+    if (job.expiresAt && new Date(job.expiresAt) < new Date()) {
+      throw new Error("Job has expired");
+    }
 
-  // Check for existing bid (unique constraint on jobId + bidderAgentId)
-  const [existing] = await db
-    .select()
-    .from(bids)
-    .where(
-      and(
-        eq(bids.jobId, params.jobId),
-        eq(bids.bidderAgentId, params.bidderAgentId)
+    // Cannot bid on own job
+    if (job.creatorAgentId === params.bidderAgentId) throw new Error("Cannot bid on your own job");
+
+    // Validate bid amount against job budget
+    if (job.budgetAmount && parseFloat(params.amount) > parseFloat(job.budgetAmount)) {
+      throw new Error("Bid amount exceeds job budget");
+    }
+
+    // Check for existing bid with row lock to prevent race conditions
+    const [existing] = await tx
+      .select()
+      .from(bids)
+      .where(
+        and(
+          eq(bids.jobId, params.jobId),
+          eq(bids.bidderAgentId, params.bidderAgentId)
+        )
       )
-    );
+      .for("update");
 
-  let bid;
-  if (existing) {
-    if (existing.status === "pending") throw new Error("Already bid on this job");
-    // Reactivate withdrawn/rejected bid with new values
-    [bid] = await db
-      .update(bids)
+    let result;
+    if (existing) {
+      if (existing.status === "pending") throw new Error("Already bid on this job");
+      // Reactivate withdrawn/rejected bid with new values
+      [result] = await tx
+        .update(bids)
+        .set({
+          amount: params.amount,
+          etaSeconds: params.etaSeconds,
+          proposal: params.proposal || null,
+          status: "pending",
+          createdAt: new Date(),
+        })
+        .where(eq(bids.id, existing.id))
+        .returning();
+    } else {
+      [result] = await tx
+        .insert(bids)
+        .values({
+          jobId: params.jobId,
+          bidderAgentId: params.bidderAgentId,
+          amount: params.amount,
+          etaSeconds: params.etaSeconds,
+          proposal: params.proposal || null,
+        })
+        .returning();
+    }
+
+    // Update reputation within same transaction
+    await tx
+      .update(reputation)
       .set({
-        amount: params.amount,
-        etaSeconds: params.etaSeconds,
-        proposal: params.proposal || null,
-        status: "pending",
-        createdAt: new Date(),
+        bidsPlaced: sql`${reputation.bidsPlaced} + 1`,
+        updatedAt: new Date(),
       })
-      .where(eq(bids.id, existing.id))
-      .returning();
-  } else {
-    [bid] = await db
-      .insert(bids)
-      .values({
-        jobId: params.jobId,
-        bidderAgentId: params.bidderAgentId,
-        amount: params.amount,
-        etaSeconds: params.etaSeconds,
-        proposal: params.proposal || null,
-      })
-      .returning();
-  }
+      .where(eq(reputation.agentId, params.bidderAgentId));
 
-  // Update reputation bids placed
-  await db
-    .update(reputation)
-    .set({
-      bidsPlaced: sql`${reputation.bidsPlaced} + 1`,
-      updatedAt: new Date(),
-    })
-    .where(eq(reputation.agentId, params.bidderAgentId));
+    return result;
+  });
 
+  // Feed event outside transaction (non-critical)
   await emitFeedEvent("bid_placed", params.jobId, {
     job_id: params.jobId,
     bid_id: bid.id,

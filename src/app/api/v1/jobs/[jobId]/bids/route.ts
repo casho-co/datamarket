@@ -14,6 +14,10 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
 ) {
+  const ip = getClientIp(req);
+  const { blocked: rl } = await checkRateLimit(`ip:${ip}`, "api");
+  if (rl) return rl;
+
   const { jobId } = await params;
   const auth = await authenticateAgent(req);
   const job = await getJobById(jobId);

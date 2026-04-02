@@ -8,7 +8,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ jobId: string }> }
 ) {
-  const ip = getClientIp(req) || "unknown";
+  const ip = getClientIp(req);
   const { blocked: rl } = await checkRateLimit(`ip:${ip}`, "api");
   if (rl) return rl;
 
