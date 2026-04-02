@@ -1,9 +1,10 @@
 import { db, withTransaction, type TX } from "@/lib/db";
-import { assignments, escrows } from "@/lib/db/schema";
-import { eq, and, lte } from "drizzle-orm";
+import { assignments, escrows, reputation, agents } from "@/lib/db/schema";
+import { eq, and, lte, sql } from "drizzle-orm";
 import { emitFeedEvent } from "@/lib/services/feed";
 import { validateEscrowTransition } from "@/lib/services/state-machine";
 import { oracleRefund } from "@/lib/bsc/escrow-contract";
+import { giveOnChainFeedback } from "@/lib/bsc/erc8004";
 
 export async function runOverdueRelease() {
   const now = new Date();
@@ -28,6 +29,15 @@ export async function runOverdueRelease() {
           .update(assignments)
           .set({ status: "cancelled" })
           .where(eq(assignments.id, assignment.id));
+
+        // Penalize worker reputation
+        await tx
+          .update(reputation)
+          .set({
+            abandonedJobs: sql`${reputation.abandonedJobs} + 1`,
+            updatedAt: new Date(),
+          })
+          .where(eq(reputation.agentId, assignment.workerAgentId));
 
         // Refund escrow
         const [escrow] = await tx
@@ -55,6 +65,27 @@ export async function runOverdueRelease() {
         assignment_id: assignment.id,
         worker_agent_id: assignment.workerAgentId,
       });
+
+      // On-chain negative feedback (best-effort)
+      try {
+        const [worker] = await db
+          .select({ erc8004AgentId: agents.erc8004AgentId })
+          .from(agents)
+          .where(eq(agents.id, assignment.workerAgentId));
+
+        if (worker?.erc8004AgentId) {
+          const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://datalayer-market.fly.dev";
+          await giveOnChainFeedback({
+            agentId: worker.erc8004AgentId,
+            value: -50,
+            tag1: "job",
+            tag2: "abandoned",
+            feedbackURI: `${baseUrl}/api/v1/jobs/${assignment.jobId}`,
+          });
+        }
+      } catch {
+        // On-chain feedback is best-effort
+      }
 
       processed++;
     } catch {

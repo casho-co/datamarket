@@ -97,6 +97,7 @@ export async function awardJob(params: {
   bidId: string;
   requesterAgentId: string;
 }) {
+  // ── DB transaction — no RPC calls, short lock ──
   const result = await withTransaction(async (tx: TX) => {
     // Row lock to prevent concurrent awards
     const [job] = await tx
@@ -141,6 +142,15 @@ export async function awardJob(params: {
       throw new Error("Job escrow not found — job may not be funded");
     }
 
+    // Verify worker has a wallet before committing
+    const [recipient] = await tx
+      .select({ walletAddress: agents.walletAddress })
+      .from(agents)
+      .where(eq(agents.id, bid.bidderAgentId));
+    if (!recipient?.walletAddress) {
+      throw new Error("Worker has no wallet address");
+    }
+
     // Accept this bid, reject others
     await tx
       .update(bids)
@@ -151,7 +161,7 @@ export async function awardJob(params: {
       .set({ status: "rejected" })
       .where(and(eq(bids.jobId, params.jobId), eq(bids.status, "pending")));
 
-    // Create assignment
+    // Create assignment (onChainSync = false until on-chain call succeeds)
     const deadlineAt = new Date(
       Date.now() + (bid.etaSeconds + 86400) * 1000
     );
@@ -176,12 +186,12 @@ export async function awardJob(params: {
       })
       .where(eq(escrows.id, escrow.id));
 
-    // Extend expiresAt to prevent cron interference during award
+    // Set expiresAt to match assignment deadline (not just 1 hour)
     await tx
       .update(jobs)
       .set({
         status: "in_progress",
-        expiresAt: new Date(Date.now() + 60 * 60 * 1000),
+        expiresAt: deadlineAt,
         updatedAt: new Date(),
       })
       .where(eq(jobs.id, params.jobId));
@@ -191,42 +201,41 @@ export async function awardJob(params: {
       escrowId: escrow.id,
       jobTitle: job.title,
       workerAgentId: bid.bidderAgentId,
+      walletAddress: recipient.walletAddress,
       amount,
       parsedAmount,
       parsedBudget,
     };
   });
 
-  // After DB transaction — single atomic on-chain call
-  if (ESCROW_CONTRACT_ADDRESS) {
-    const [recipient] = await db
-      .select({ walletAddress: agents.walletAddress })
-      .from(agents)
-      .where(eq(agents.id, result.workerAgentId));
-
-    if (recipient?.walletAddress) {
-      try {
-        if (result.parsedAmount < result.parsedBudget) {
-          // Bid < budget: assign seller AND adjust amount atomically
-          await oracleAssignSellerAndAdjust(
-            params.jobId,
-            recipient.walletAddress,
-            result.amount,
-          );
-        } else {
-          // Bid == budget: just assign seller
-          await oracleAssignSeller(params.jobId, recipient.walletAddress);
-        }
-      } catch (err) {
-        // On-chain call failed after DB commit — log for reconciliation
-        // DB shows in_progress but chain still has seller=address(0)
-        // A reconciliation cron can retry oracleAssignSellerAndAdjust
-        console.error(
-          `[awardJob] On-chain assignSeller failed for job ${params.jobId}:`,
-          err instanceof Error ? err.message : err
+  // ── On-chain call AFTER transaction — track sync status ──
+  let onChainSync = false;
+  if (ESCROW_CONTRACT_ADDRESS && result.walletAddress) {
+    try {
+      if (result.parsedAmount < result.parsedBudget) {
+        await oracleAssignSellerAndAdjust(
+          params.jobId,
+          result.walletAddress,
+          result.amount,
         );
+      } else {
+        await oracleAssignSeller(params.jobId, result.walletAddress);
       }
+      onChainSync = true;
+    } catch (err) {
+      console.error(
+        `[awardJob] On-chain assignSeller failed for job ${params.jobId}:`,
+        err instanceof Error ? err.message : err
+      );
     }
+  }
+
+  // Update sync status
+  if (onChainSync) {
+    await db
+      .update(assignments)
+      .set({ onChainSync: true })
+      .where(eq(assignments.id, result.assignment.id));
   }
 
   // Post-transaction side effects
@@ -242,7 +251,11 @@ export async function awardJob(params: {
     .from(escrows)
     .where(eq(escrows.id, result.escrowId));
 
-  return { assignment: result.assignment, escrow: updatedEscrow };
+  return {
+    assignment: { ...result.assignment, onChainSync },
+    escrow: updatedEscrow,
+    on_chain_status: onChainSync ? "synced" : "pending",
+  };
 }
 
 export async function submitWork(params: {
@@ -373,6 +386,15 @@ export async function acceptWork(params: {
 
     if (submittedAssignments.length === 0)
       throw new Error("No submitted work to accept");
+
+    // Block release if on-chain seller not yet assigned
+    for (const a of submittedAssignments) {
+      if (!a.onChainSync) {
+        throw new Error(
+          `Assignment ${a.id} is not synced on-chain. The seller has not been assigned on the escrow contract yet. Please retry shortly.`
+        );
+      }
+    }
 
     const workerIds: string[] = [];
     const releasedEscrows: { escrowId: string; workerAgentId: string; amount: string }[] = [];
