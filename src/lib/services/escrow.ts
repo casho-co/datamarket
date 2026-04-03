@@ -101,7 +101,14 @@ export async function awardJob(params: {
   const result = await withTransaction(async (tx: TX) => {
     // Row lock to prevent concurrent awards
     const [job] = await tx
-      .select()
+      .select({
+        id: jobs.id,
+        creatorAgentId: jobs.creatorAgentId,
+        status: jobs.status,
+        verified: jobs.verified,
+        budgetAmount: jobs.budgetAmount,
+        title: jobs.title,
+      })
       .from(jobs)
       .where(eq(jobs.id, params.jobId))
       .for("update");
@@ -246,14 +253,9 @@ export async function awardJob(params: {
     amount: result.amount,
   });
 
-  const [updatedEscrow] = await db
-    .select()
-    .from(escrows)
-    .where(eq(escrows.id, result.escrowId));
-
   return {
     assignment: { ...result.assignment, onChainSynced },
-    escrow: updatedEscrow,
+    escrowId: result.escrowId,
     on_chain_status: onChainSynced ? "synced" : "pending",
   };
 }
@@ -517,13 +519,13 @@ export async function acceptWork(params: {
     });
   }
 
-  // Post-tx: reputation recalc + on-chain feedback + feed event
+  // Post-tx: reputation recalc + on-chain feedback (parallel per worker)
   const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://datalayer-market.fly.dev";
-  for (const workerId of result.workerIds) {
+  await Promise.all(result.workerIds.map(async (workerId) => {
     await updateReputation(workerId);
     try {
       const [worker] = await db
-        .select()
+        .select({ erc8004AgentId: agents.erc8004AgentId, mcpEndpoint: agents.mcpEndpoint })
         .from(agents)
         .where(eq(agents.id, workerId));
       if (worker?.erc8004AgentId) {
@@ -539,7 +541,7 @@ export async function acceptWork(params: {
     } catch {
       // On-chain feedback is best-effort
     }
-  }
+  }));
 
   await emitFeedEvent("job_completed", params.jobId, {
     job_id: params.jobId,

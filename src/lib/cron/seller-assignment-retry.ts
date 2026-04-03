@@ -14,14 +14,19 @@ import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
 export async function runSellerAssignmentRetry() {
   if (!ESCROW_CONTRACT_ADDRESS) return { synced: 0, failed: 0 };
 
+  // Single JOIN query instead of N+1 per assignment
   const unsynced = await db
     .select({
       id: assignments.id,
       jobId: assignments.jobId,
       workerAgentId: assignments.workerAgentId,
       escrowAmount: assignments.escrowAmount,
+      walletAddress: agents.walletAddress,
+      budgetAmount: jobs.budgetAmount,
     })
     .from(assignments)
+    .innerJoin(agents, eq(assignments.workerAgentId, agents.id))
+    .innerJoin(jobs, eq(assignments.jobId, jobs.id))
     .where(
       and(
         eq(assignments.onChainSynced, false),
@@ -32,51 +37,41 @@ export async function runSellerAssignmentRetry() {
   let synced = 0;
   let failed = 0;
 
-  for (const assignment of unsynced) {
+  for (const row of unsynced) {
     try {
-      const [worker] = await db
-        .select({ walletAddress: agents.walletAddress })
-        .from(agents)
-        .where(eq(agents.id, assignment.workerAgentId));
-
-      if (!worker?.walletAddress) {
-        console.error(`[seller-assignment-retry] Worker ${assignment.workerAgentId} has no wallet`);
+      if (!row.walletAddress) {
+        console.error(`[seller-assignment-retry] Worker ${row.workerAgentId} has no wallet`);
         failed++;
         continue;
       }
 
-      const [job] = await db
-        .select({ budgetAmount: jobs.budgetAmount })
-        .from(jobs)
-        .where(eq(jobs.id, assignment.jobId));
-
-      if (!job?.budgetAmount) {
+      if (!row.budgetAmount) {
         failed++;
         continue;
       }
 
-      const parsedAmount = parseFloat(assignment.escrowAmount);
-      const parsedBudget = parseFloat(job.budgetAmount);
+      const parsedAmount = parseFloat(row.escrowAmount);
+      const parsedBudget = parseFloat(row.budgetAmount);
 
       if (parsedAmount < parsedBudget) {
         await oracleAssignSellerAndAdjust(
-          assignment.jobId,
-          worker.walletAddress,
-          assignment.escrowAmount,
+          row.jobId,
+          row.walletAddress,
+          row.escrowAmount,
         );
       } else {
-        await oracleAssignSeller(assignment.jobId, worker.walletAddress);
+        await oracleAssignSeller(row.jobId, row.walletAddress);
       }
 
       await db
         .update(assignments)
         .set({ onChainSynced: true })
-        .where(eq(assignments.id, assignment.id));
+        .where(eq(assignments.id, row.id));
 
       synced++;
     } catch (err) {
       console.error(
-        `[seller-assignment-retry] Failed for assignment ${assignment.id}:`,
+        `[seller-assignment-retry] Failed for assignment ${row.id}:`,
         err instanceof Error ? err.message : err
       );
       failed++;

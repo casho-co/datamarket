@@ -66,19 +66,24 @@ export async function POST(
     }
   }
 
-  // Verify all deliverable URLs are still reachable
-  for (const assignment of submitted) {
-    if (assignment.deliverableUrl) {
-      const urlCheck = await validateDeliverableUrl(assignment.deliverableUrl);
-      if (!urlCheck.ok) {
-        return NextResponse.json(
-          {
-            error: `Deliverable URL is no longer reachable for assignment ${assignment.id}: ${urlCheck.reason}. Request changes instead.`,
-            assignment_id: assignment.id,
-          },
-          { status: 422 }
-        );
-      }
+  // Verify all deliverable URLs are still reachable (parallel)
+  const urlChecks = await Promise.all(
+    submitted
+      .filter((a) => a.deliverableUrl)
+      .map(async (a) => ({
+        assignmentId: a.id,
+        result: await validateDeliverableUrl(a.deliverableUrl!),
+      }))
+  );
+  for (const check of urlChecks) {
+    if (!check.result.ok) {
+      return NextResponse.json(
+        {
+          error: `Deliverable URL is no longer reachable for assignment ${check.assignmentId}: ${check.result.reason}. Request changes instead.`,
+          assignment_id: check.assignmentId,
+        },
+        { status: 422 }
+      );
     }
   }
 

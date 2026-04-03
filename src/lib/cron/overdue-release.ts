@@ -1,4 +1,4 @@
-import { db, withTransaction, type TX } from "@/lib/db";
+import { db } from "@/lib/db";
 import { assignments, escrows, reputation, agents } from "@/lib/db/schema";
 import { eq, and, lte, sql } from "drizzle-orm";
 import { emitFeedEvent } from "@/lib/services/feed";
@@ -10,7 +10,11 @@ export async function runOverdueRelease() {
   const now = new Date();
 
   const overdueAssignments = await db
-    .select()
+    .select({
+      id: assignments.id,
+      jobId: assignments.jobId,
+      workerAgentId: assignments.workerAgentId,
+    })
     .from(assignments)
     .where(
       and(
@@ -23,50 +27,52 @@ export async function runOverdueRelease() {
 
   for (const assignment of overdueAssignments) {
     try {
-      await withTransaction(async (tx: TX) => {
-        // Cancel assignment
-        await tx
-          .update(assignments)
-          .set({ status: "cancelled" })
-          .where(eq(assignments.id, assignment.id));
+      // Find escrow for this assignment
+      const [escrow] = await db
+        .select({ id: escrows.id, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
+        .from(escrows)
+        .where(
+          and(
+            eq(escrows.assignmentId, assignment.id),
+            eq(escrows.status, "funded")
+          )
+        );
 
-        // Penalize worker reputation
-        await tx
-          .update(reputation)
-          .set({
-            abandonedJobs: sql`${reputation.abandonedJobs} + 1`,
-            updatedAt: new Date(),
-          })
-          .where(eq(reputation.agentId, assignment.workerAgentId));
+      // On-chain refund BEFORE DB updates
+      let refundTxHash: string | null = null;
+      if (escrow?.onChainTxHash) {
+        validateEscrowTransition(escrow.status, "refunded", escrow.id);
+        refundTxHash = await oracleRefund(escrow.id);
+      }
 
-        // Refund escrow
-        const [escrow] = await tx
-          .select()
-          .from(escrows)
-          .where(
-            and(
-              eq(escrows.assignmentId, assignment.id),
-              eq(escrows.status, "funded")
-            )
-          );
+      // DB updates (no RPC calls, fast)
+      await db
+        .update(assignments)
+        .set({ status: "cancelled" })
+        .where(eq(assignments.id, assignment.id));
 
-        if (escrow && escrow.onChainTxHash) {
-          validateEscrowTransition(escrow.status, "refunded", escrow.id);
-          const refundTxHash = await oracleRefund(escrow.id);
-          await tx
-            .update(escrows)
-            .set({ status: "refunded", refundedAt: now, releaseTxHash: refundTxHash })
-            .where(eq(escrows.id, escrow.id));
-        }
-      });
+      await db
+        .update(reputation)
+        .set({
+          abandonedJobs: sql`${reputation.abandonedJobs} + 1`,
+          updatedAt: new Date(),
+        })
+        .where(eq(reputation.agentId, assignment.workerAgentId));
 
+      if (escrow && refundTxHash) {
+        await db
+          .update(escrows)
+          .set({ status: "refunded", refundedAt: now, releaseTxHash: refundTxHash })
+          .where(eq(escrows.id, escrow.id));
+      }
+
+      // Post-update side effects (best-effort)
       await emitFeedEvent("assignment_overdue", assignment.jobId, {
         job_id: assignment.jobId,
         assignment_id: assignment.id,
         worker_agent_id: assignment.workerAgentId,
       });
 
-      // On-chain negative feedback (best-effort)
       try {
         const [worker] = await db
           .select({ erc8004AgentId: agents.erc8004AgentId })
