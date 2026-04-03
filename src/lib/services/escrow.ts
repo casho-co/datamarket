@@ -383,6 +383,7 @@ export async function acceptWork(params: {
   jobId: string;
   requesterAgentId: string;
 }) {
+  // ── DB transaction — validate + update statuses, no RPC ──
   const result = await withTransaction(async (tx: TX) => {
     const [job] = await tx.select().from(jobs).where(eq(jobs.id, params.jobId));
     if (!job) throw new Error("Job not found");
@@ -412,7 +413,7 @@ export async function acceptWork(params: {
     }
 
     const workerIds: string[] = [];
-    const releasedEscrows: { escrowId: string; workerAgentId: string; amount: string }[] = [];
+    const pendingReleases: { escrowId: string; refId: string; workerAgentId: string; amount: string; onChainTxHash: string }[] = [];
 
     for (const assignment of submittedAssignments) {
       validateAssignmentTransition(
@@ -421,7 +422,7 @@ export async function acceptWork(params: {
         assignment.id
       );
 
-      // Release escrow on-chain
+      // Validate escrow is ready (but don't call on-chain yet)
       const [escrow] = await tx
         .select()
         .from(escrows)
@@ -432,15 +433,12 @@ export async function acceptWork(params: {
         if (!escrow.onChainTxHash) {
           throw new Error("On-chain escrow not yet funded on-chain");
         }
-        const releaseTxHash = await onChainRelease(escrow.id);
-        await tx
-          .update(escrows)
-          .set({ status: "released", releasedAt: new Date(), releaseTxHash })
-          .where(eq(escrows.id, escrow.id));
-        releasedEscrows.push({
+        pendingReleases.push({
           escrowId: escrow.id,
+          refId: escrow.refId,
           workerAgentId: assignment.workerAgentId,
           amount: escrow.amount,
+          onChainTxHash: escrow.onChainTxHash,
         });
       }
 
@@ -485,13 +483,35 @@ export async function acceptWork(params: {
     return {
       accepted: submittedAssignments.length,
       workerIds,
-      releasedEscrows,
+      pendingReleases,
       jobTitle: job.title,
     };
   });
 
+  // ── On-chain releases AFTER transaction ──
+  const releasedEscrows: { escrowId: string; workerAgentId: string; amount: string }[] = [];
+  for (const pending of result.pendingReleases) {
+    try {
+      const releaseTxHash = await onChainRelease(pending.escrowId);
+      await db
+        .update(escrows)
+        .set({ status: "released", releasedAt: new Date(), releaseTxHash })
+        .where(eq(escrows.id, pending.escrowId));
+      releasedEscrows.push({
+        escrowId: pending.escrowId,
+        workerAgentId: pending.workerAgentId,
+        amount: pending.amount,
+      });
+    } catch (err) {
+      console.error(
+        `[acceptWork] On-chain release failed for escrow ${pending.escrowId}:`,
+        err instanceof Error ? err.message : err
+      );
+    }
+  }
+
   // Post-tx: buyback-and-burn for agents with tokens (best-effort, non-blocking)
-  for (const esc of result.releasedEscrows) {
+  for (const esc of releasedEscrows) {
     tryBuybackForAgent(esc.workerAgentId, esc.amount, esc.escrowId).catch(() => {
       // Buyback is best-effort
     });
@@ -531,60 +551,48 @@ export async function acceptWork(params: {
 }
 
 export async function releaseEscrow(escrowId: string) {
-  const esc = await withTransaction(async (tx: TX) => {
-    const [found] = await tx
-      .select()
-      .from(escrows)
-      .where(eq(escrows.id, escrowId));
-    if (!found || found.status !== "funded") return null;
+  // Pre-validate
+  const [found] = await db.select().from(escrows).where(eq(escrows.id, escrowId));
+  if (!found || found.status !== "funded") return null;
+  validateEscrowTransition(found.status, "released", escrowId);
+  if (!found.onChainTxHash) throw new Error("On-chain escrow not yet funded on-chain");
 
-    validateEscrowTransition(found.status, "released", escrowId);
+  // On-chain call first
+  const releaseTxHash = await onChainRelease(escrowId);
 
-    if (!found.onChainTxHash) {
-      throw new Error("On-chain escrow not yet funded on-chain");
-    }
-    const releaseTxHash = await onChainRelease(escrowId);
-    const [updated] = await tx
-      .update(escrows)
-      .set({ status: "released", releasedAt: new Date(), releaseTxHash })
-      .where(eq(escrows.id, escrowId))
-      .returning();
-    return updated;
-  });
+  // DB update after on-chain success
+  const [updated] = await db
+    .update(escrows)
+    .set({ status: "released", releasedAt: new Date(), releaseTxHash })
+    .where(eq(escrows.id, escrowId))
+    .returning();
 
-  // Trigger buyback-and-burn for agents with tokens (best-effort)
-  if (esc?.recipientAgentId) {
-    tryBuybackForAgent(esc.recipientAgentId, esc.amount, esc.id).catch(() => {
-      // Buyback is best-effort
-    });
+  // Trigger buyback-and-burn (best-effort)
+  if (updated?.recipientAgentId) {
+    tryBuybackForAgent(updated.recipientAgentId, updated.amount, updated.id).catch(() => {});
   }
 
-  return esc;
+  return updated;
 }
 
 export async function refundEscrow(escrowId: string) {
-  const esc = await withTransaction(async (tx: TX) => {
-    const [found] = await tx
-      .select()
-      .from(escrows)
-      .where(eq(escrows.id, escrowId));
-    if (!found || found.status !== "funded") return null;
+  // Pre-validate
+  const [found] = await db.select().from(escrows).where(eq(escrows.id, escrowId));
+  if (!found || found.status !== "funded") return null;
+  validateEscrowTransition(found.status, "refunded", escrowId);
+  if (!found.onChainTxHash) throw new Error("On-chain escrow not yet funded on-chain");
 
-    validateEscrowTransition(found.status, "refunded", escrowId);
+  // On-chain call first
+  const refundTxHash = await onChainRefund(escrowId);
 
-    if (!found.onChainTxHash) {
-      throw new Error("On-chain escrow not yet funded on-chain");
-    }
-    const refundTxHash = await onChainRefund(escrowId);
-    const [updated] = await tx
-      .update(escrows)
-      .set({ status: "refunded", refundedAt: new Date(), releaseTxHash: refundTxHash })
-      .where(eq(escrows.id, escrowId))
-      .returning();
-    return updated;
-  });
+  // DB update after on-chain success
+  const [updated] = await db
+    .update(escrows)
+    .set({ status: "refunded", refundedAt: new Date(), releaseTxHash: refundTxHash })
+    .where(eq(escrows.id, escrowId))
+    .returning();
 
-  return esc;
+  return updated;
 }
 
 export async function requestChanges(params: {

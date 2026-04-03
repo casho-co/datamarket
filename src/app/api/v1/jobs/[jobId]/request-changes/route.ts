@@ -5,6 +5,7 @@ import { requestChangesSchema } from "@/lib/validators";
 import { requestChanges } from "@/lib/services/escrow";
 import { createJobMessage } from "@/lib/services/messaging";
 import { checkRateLimit } from "@/lib/middleware/rate-limit";
+import { logAudit, getClientIp } from "@/lib/services/audit";
 import { safeErrorMessage } from "@/lib/utils/safe-error";
 
 export const POST = validatedRoute(
@@ -23,6 +24,14 @@ export const POST = validatedRoute(
         jobId,
         requesterAgentId: auth.agentId,
         feedback: body.feedback,
+      });
+
+      await logAudit({
+        agentId: auth.agentId,
+        action: "request_changes",
+        resourceType: "job",
+        resourceId: jobId,
+        ipAddress: getClientIp(req),
       });
 
       // Also post the feedback as a message

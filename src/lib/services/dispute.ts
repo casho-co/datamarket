@@ -123,19 +123,7 @@ export async function openDispute(params: {
 
   const dispute = result.dispute;
 
-  // Post-transaction: trigger AI resolver immediately (non-blocking)
-  if (dispute.resolverAgentId) {
-    import("@/lib/services/ai-dispute-resolver")
-      .then(({ resolveDisputeWithAI }) =>
-        resolveDisputeWithAI(dispute.id, dispute.resolverAgentId!)
-      )
-      .then((r) => {
-        if (r) console.log(`[AI-Resolver] Immediate resolution: ${r.ruling} — ${r.reasoning}`);
-      })
-      .catch((err) =>
-        console.error(`[AI-Resolver] Immediate resolution failed, will retry via cron:`, err)
-      );
-  }
+  // AI resolver runs via cron (ai-dispute-resolve) on the next cycle
 
   // Post-transaction side effects
   await emitFeedEvent("dispute_opened", params.jobId, {
@@ -239,32 +227,66 @@ export async function resolveDispute(params: {
   ruling: "requester_wins" | "worker_wins" | "split" | "redo";
   splitBps?: number;
 }) {
+  // ── Pre-validate with reads (no locks) ──
+  const [dispute] = await db
+    .select()
+    .from(disputes)
+    .where(eq(disputes.id, params.disputeId));
+  if (!dispute) throw new Error("Dispute not found");
+  if (dispute.ruling !== "pending") throw new Error("Already resolved");
+  if (dispute.resolverAgentId && dispute.resolverAgentId !== params.resolverAgentId) {
+    throw new Error("Not authorized to resolve");
+  }
+  if (!dispute.assignmentId) throw new Error("Assignment not found");
+
+  const [assignment] = await db
+    .select()
+    .from(assignments)
+    .where(eq(assignments.id, dispute.assignmentId));
+  if (!assignment) throw new Error("Assignment not found");
+
+  const [escrow] = await db
+    .select()
+    .from(escrows)
+    .where(eq(escrows.assignmentId, assignment.id));
+  if (!escrow) throw new Error("Escrow not found");
+  if (!escrow.onChainTxHash) throw new Error("On-chain escrow not yet funded on-chain");
+
+  const escrowAmount = parseFloat(escrow.amount);
+  const resolverFee = (escrowAmount * RESOLVER_FEE_BPS) / 10000;
+  const remainingEscrow = escrowAmount - resolverFee;
+
+  // ── On-chain calls BEFORE transaction (for non-redo rulings) ──
+  let releaseTxHash: string | null = null;
+
+  if (params.ruling !== "redo") {
+    // Verify on-chain state
+    const onChainState = await getOnChainEscrow(escrow.refId);
+    const isDisputedOnChain = onChainState.disputed || onChainState.state === OnChainEscrowState.DISPUTED;
+
+    if (!isDisputedOnChain) {
+      throw new Error(
+        "On-chain escrow is not in disputed state. The buyer must sign the dispute transaction first."
+      );
+    }
+
+    if (params.ruling === "split") {
+      const bps = params.splitBps || 5000;
+      releaseTxHash = await onChainResolveDisputeSplit(escrow.refId, bps);
+    } else {
+      const releaseToSeller = params.ruling === "worker_wins";
+      releaseTxHash = await onChainResolveDispute(escrow.refId, releaseToSeller);
+    }
+  }
+
+  // ── DB transaction — short, no RPC ──
   const result = await withTransaction(async (tx: TX) => {
-    const [dispute] = await tx
+    // Re-validate dispute is still pending (could have changed)
+    const [d] = await tx
       .select()
       .from(disputes)
       .where(eq(disputes.id, params.disputeId));
-    if (!dispute) throw new Error("Dispute not found");
-    if (dispute.ruling !== "pending") throw new Error("Already resolved");
-    if (
-      dispute.resolverAgentId &&
-      dispute.resolverAgentId !== params.resolverAgentId
-    ) {
-      throw new Error("Not authorized to resolve");
-    }
-
-    if (!dispute.assignmentId) throw new Error("Assignment not found");
-    const [assignment] = await tx
-      .select()
-      .from(assignments)
-      .where(eq(assignments.id, dispute.assignmentId));
-    if (!assignment) throw new Error("Assignment not found");
-
-    const [escrow] = await tx
-      .select()
-      .from(escrows)
-      .where(eq(escrows.assignmentId, assignment.id));
-    if (!escrow) throw new Error("Escrow not found");
+    if (!d || d.ruling !== "pending") throw new Error("Already resolved");
 
     const [job] = await tx
       .select()
@@ -272,16 +294,7 @@ export async function resolveDispute(params: {
       .where(eq(jobs.id, assignment.jobId));
     if (!job) throw new Error("Job not found");
 
-    const escrowAmount = parseFloat(escrow.amount);
-    const depositAmount = parseFloat(dispute.depositAmount);
-    const resolverFee = (escrowAmount * RESOLVER_FEE_BPS) / 10000;
-    const remainingEscrow = escrowAmount - resolverFee;
-    if (!escrow.onChainTxHash) {
-      throw new Error("On-chain escrow not yet funded on-chain");
-    }
-
     if (params.ruling === "redo") {
-      // Redo: keep funds locked on-chain (contract stays FUNDED), reset assignment
       validateAssignmentTransition("disputed", "in_progress", assignment.id);
       await tx
         .update(assignments)
@@ -298,33 +311,7 @@ export async function resolveDispute(params: {
         .update(escrows)
         .set({ status: "funded" })
         .where(eq(escrows.assignmentId, assignment.id));
-
-      // Dispute deposit was on-chain — no off-chain balance to refund
     } else {
-      // Resolve on-chain: requester_wins, worker_wins, or split
-      let releaseTxHash: string;
-
-      // Check on-chain state to determine the right contract call
-      const onChainState = await getOnChainEscrow(escrow.refId);
-      const isDisputedOnChain = onChainState.disputed || onChainState.state === OnChainEscrowState.DISPUTED;
-
-      if (!isDisputedOnChain) {
-        throw new Error(
-          "On-chain escrow is not in disputed state. The buyer must sign the dispute transaction first."
-        );
-      }
-
-      // Normal path: escrow is disputed on-chain, use resolveDispute
-      if (params.ruling === "split") {
-        const bps = params.splitBps || 5000;
-        releaseTxHash = await onChainResolveDisputeSplit(escrow.refId, bps);
-      } else {
-        const releaseToSeller = params.ruling === "worker_wins";
-        releaseTxHash = await onChainResolveDispute(escrow.refId, releaseToSeller);
-      }
-
-      // Dispute deposit was on-chain — no off-chain balance to refund
-
       // Update reputation
       if (params.ruling === "requester_wins") {
         await tx
@@ -332,7 +319,7 @@ export async function resolveDispute(params: {
           .set({ disputesLost: sql`${reputation.disputesLost} + 1`, updatedAt: new Date() })
           .where(eq(reputation.agentId, assignment.workerAgentId));
       } else if (params.ruling === "worker_wins") {
-        if (dispute.openerAgentId === job.creatorAgentId) {
+        if (d.openerAgentId === job.creatorAgentId) {
           await tx
             .update(reputation)
             .set({ disputesLost: sql`${reputation.disputesLost} + 1`, updatedAt: new Date() })
