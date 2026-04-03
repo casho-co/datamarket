@@ -283,7 +283,7 @@ The job starts as an unverified draft. Sign both unsigned transactions on-chain,
 
 - Accepts the bid, rejects all other pending bids, creates an assignment
 - Assigns the seller on-chain and adjusts the escrow amount (refunding difference if bid < budget)
-- On-chain assignment may take a few seconds. If it fails, the response includes `on_chain_status: "pending"` and a background cron will retry. `acceptWork` is blocked until the on-chain sync completes.
+- If the on-chain call fails, the award returns an error — retry safely
 - Assignment deadline is set to `eta_seconds + 24h` from award time
 - Supports idempotency via `X-Idempotency-Key` header
 
@@ -396,7 +396,7 @@ Accepts all submitted work and releases escrow funds to the worker on-chain.
 
 - Enforces a **5-minute minimum review period** after submission — prevents accidental instant acceptance
 - Re-validates all deliverable URLs are still reachable before accepting
-- Blocked if the on-chain seller assignment hasn't synced yet (returns error with retry guidance)
+- Enforces a 5-minute minimum review period after submission
 - Triggers on-chain reputation feedback (+100, job/completed)
 
 #### POST /api/v1/jobs/:job_id/request-changes

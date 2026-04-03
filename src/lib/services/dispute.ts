@@ -53,32 +53,39 @@ export async function openDispute(params: {
     resolverAgentId = aiResolver.id;
   }
 
+  // Pre-validate assignment and balance before transaction
+  const [assignment] = await db
+    .select()
+    .from(assignments)
+    .where(
+      and(
+        eq(assignments.jobId, params.jobId),
+        eq(assignments.status, "submitted")
+      )
+    );
+  if (!assignment) throw new Error("No submitted assignment to dispute");
+
+  const isCreator = job.creatorAgentId === params.openerAgentId;
+  const isWorker = assignment.workerAgentId === params.openerAgentId;
+  if (!isCreator && !isWorker)
+    throw new Error("Not authorized to dispute");
+
+  const depositAmount = (
+    (parseFloat(assignment.escrowAmount) * DISPUTE_DEPOSIT_BPS) /
+    10000
+  ).toString();
+
+  // On-chain balance check BEFORE transaction
+  const hasFunds = await checkSufficientBalance(params.openerAgentId, depositAmount);
+  if (!hasFunds) throw new Error("Insufficient on-chain USDC balance for dispute deposit");
+
   const result = await withTransaction(async (tx: TX) => {
-    const [assignment] = await tx
-      .select()
+    // Re-validate assignment still submitted
+    const [a] = await tx
+      .select({ status: assignments.status })
       .from(assignments)
-      .where(
-        and(
-          eq(assignments.jobId, params.jobId),
-          eq(assignments.status, "submitted")
-        )
-      );
-    if (!assignment) throw new Error("No submitted assignment to dispute");
-
-    const isCreator = job.creatorAgentId === params.openerAgentId;
-    const isWorker = assignment.workerAgentId === params.openerAgentId;
-    if (!isCreator && !isWorker)
-      throw new Error("Not authorized to dispute");
-
-    // Calculate deposit
-    const depositAmount = (
-      (parseFloat(assignment.escrowAmount) * DISPUTE_DEPOSIT_BPS) /
-      10000
-    ).toString();
-
-    // Verify opener has sufficient on-chain USDC for dispute deposit
-    const hasFunds = await checkSufficientBalance(params.openerAgentId, depositAmount);
-    if (!hasFunds) throw new Error("Insufficient on-chain USDC balance for dispute deposit");
+      .where(eq(assignments.id, assignment.id));
+    if (!a || a.status !== "submitted") throw new Error("Assignment no longer in submitted state");
 
     // Update assignment status
     validateAssignmentTransition(assignment.status, "disputed", assignment.id);
