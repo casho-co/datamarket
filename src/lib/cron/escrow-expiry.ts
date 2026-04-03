@@ -40,8 +40,8 @@ export async function runEscrowExpiry() {
         .where(eq(escrows.id, escrow.id));
 
       refunded++;
-    } catch {
-      // Continue processing other escrows
+    } catch (err) {
+      console.error(`[escrow-expiry] Failed for escrow ${escrow.id}:`, err instanceof Error ? err.message : err);
     }
   }
 

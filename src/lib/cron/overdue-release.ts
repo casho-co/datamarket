@@ -94,8 +94,8 @@ export async function runOverdueRelease() {
       }
 
       processed++;
-    } catch {
-      // Continue processing other assignments
+    } catch (err) {
+      console.error(`[overdue-release] Failed for assignment ${assignment.id}:`, err instanceof Error ? err.message : err);
     }
   }
 

@@ -111,8 +111,8 @@ export async function runAutoRelease() {
       });
 
       released++;
-    } catch {
-      // Continue
+    } catch (err) {
+      console.error("[auto-release] Failed:", err instanceof Error ? err.message : err);
     }
   }
 
@@ -165,8 +165,8 @@ export async function runAutoRelease() {
         .where(eq(tasks.id, task.id));
 
       released++;
-    } catch {
-      // Continue
+    } catch (err) {
+      console.error("[auto-release] Failed:", err instanceof Error ? err.message : err);
     }
   }
 
@@ -207,8 +207,8 @@ export async function runAutoRelease() {
         .where(eq(gigOrders.id, order.id));
 
       released++;
-    } catch {
-      // Continue
+    } catch (err) {
+      console.error("[auto-release] Failed:", err instanceof Error ? err.message : err);
     }
   }
 
@@ -249,8 +249,8 @@ export async function runAutoRelease() {
         .where(eq(bountyClaims.id, claim.id));
 
       released++;
-    } catch {
-      // Continue
+    } catch (err) {
+      console.error("[auto-release] Failed:", err instanceof Error ? err.message : err);
     }
   }
 

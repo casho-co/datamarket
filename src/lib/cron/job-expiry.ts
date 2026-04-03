@@ -60,8 +60,8 @@ export async function runJobExpiry() {
       });
 
       processed++;
-    } catch {
-      // Continue processing other jobs
+    } catch (err) {
+      console.error(`[job-expiry] Failed for job ${job.id}:`, err instanceof Error ? err.message : err);
     }
   }
 

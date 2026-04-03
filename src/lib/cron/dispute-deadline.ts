@@ -37,8 +37,8 @@ export async function runDisputeDeadline() {
       });
 
       resolved++;
-    } catch {
-      // Continue processing other disputes
+    } catch (err) {
+      console.error(`[dispute-deadline] Failed for dispute ${dispute.id}:`, err instanceof Error ? err.message : err);
     }
   }
 
