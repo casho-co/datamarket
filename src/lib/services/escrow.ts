@@ -341,15 +341,29 @@ export async function acceptWork(params: {
   jobId: string;
   requesterAgentId: string;
 }) {
-  // ── Pre-validate with reads ──
-  const [job] = await db.select().from(jobs).where(eq(jobs.id, params.jobId));
+  // ── Pre-validate with reads (single JOIN, no N+1) ──
+  const [job] = await db
+    .select({ id: jobs.id, creatorAgentId: jobs.creatorAgentId, status: jobs.status, title: jobs.title })
+    .from(jobs)
+    .where(eq(jobs.id, params.jobId));
   if (!job) throw new Error("Job not found");
   if (job.creatorAgentId !== params.requesterAgentId)
     throw new Error("Not job creator");
+  if (job.status !== "in_progress")
+    throw new Error("Job is not in progress");
 
-  const submittedAssignments = await db
-    .select()
+  const rows = await db
+    .select({
+      assignmentId: assignments.id,
+      workerAgentId: assignments.workerAgentId,
+      escrowAmount: assignments.escrowAmount,
+      escrowId: escrows.id,
+      escrowStatus: escrows.status,
+      escrowAmount2: escrows.amount,
+      onChainTxHash: escrows.onChainTxHash,
+    })
     .from(assignments)
+    .leftJoin(escrows, eq(escrows.assignmentId, assignments.id))
     .where(
       and(
         eq(assignments.jobId, params.jobId),
@@ -357,27 +371,22 @@ export async function acceptWork(params: {
       )
     );
 
-  if (submittedAssignments.length === 0)
+  if (rows.length === 0)
     throw new Error("No submitted work to accept");
 
-  // Collect escrows for release
+  // Validate escrows and collect for release
   const toRelease: { escrowId: string; assignmentId: string; workerAgentId: string; amount: string }[] = [];
-  for (const assignment of submittedAssignments) {
-    const [escrow] = await db
-      .select()
-      .from(escrows)
-      .where(eq(escrows.assignmentId, assignment.id));
-
-    if (escrow) {
-      validateEscrowTransition(escrow.status, "released", escrow.id);
-      if (!escrow.onChainTxHash) {
+  for (const row of rows) {
+    if (row.escrowId && row.escrowStatus) {
+      validateEscrowTransition(row.escrowStatus, "released", row.escrowId);
+      if (!row.onChainTxHash) {
         throw new Error("On-chain escrow not yet funded on-chain");
       }
       toRelease.push({
-        escrowId: escrow.id,
-        assignmentId: assignment.id,
-        workerAgentId: assignment.workerAgentId,
-        amount: escrow.amount,
+        escrowId: row.escrowId,
+        assignmentId: row.assignmentId,
+        workerAgentId: row.workerAgentId,
+        amount: row.escrowAmount2 || row.escrowAmount,
       });
     }
   }
@@ -393,24 +402,24 @@ export async function acceptWork(params: {
   const result = await withTransaction(async (tx: TX) => {
     const workerIds: string[] = [];
 
-    for (const assignment of submittedAssignments) {
-      validateAssignmentTransition(assignment.status, "accepted", assignment.id);
+    for (const row of rows) {
+      validateAssignmentTransition("submitted", "accepted", row.assignmentId);
 
       await tx
         .update(assignments)
         .set({ status: "accepted" })
-        .where(eq(assignments.id, assignment.id));
+        .where(eq(assignments.id, row.assignmentId));
 
       await tx
         .update(reputation)
         .set({
           completedJobs: sql`${reputation.completedJobs} + 1`,
-          totalEarned: sql`(CAST(${reputation.totalEarned} AS DECIMAL) + ${parseFloat(assignment.escrowAmount)})::TEXT`,
+          totalEarned: sql`(CAST(${reputation.totalEarned} AS DECIMAL) + ${parseFloat(row.escrowAmount)})::TEXT`,
           updatedAt: new Date(),
         })
-        .where(eq(reputation.agentId, assignment.workerAgentId));
+        .where(eq(reputation.agentId, row.workerAgentId));
 
-      workerIds.push(assignment.workerAgentId);
+      workerIds.push(row.workerAgentId);
     }
 
     // Update escrow DB status
@@ -440,7 +449,7 @@ export async function acceptWork(params: {
         .where(eq(jobs.id, params.jobId));
     }
 
-    return { accepted: submittedAssignments.length, workerIds, jobTitle: job.title };
+    return { accepted: rows.length, workerIds, jobTitle: job.title };
   });
 
   // Post-tx: buyback-and-burn (best-effort, non-blocking)
@@ -531,7 +540,7 @@ export async function requestChanges(params: {
   requesterAgentId: string;
   feedback: string;
 }) {
-  return withTransaction(async (tx: TX) => {
+  const result = await withTransaction(async (tx: TX) => {
     const [job] = await tx.select().from(jobs).where(eq(jobs.id, params.jobId));
     if (!job) throw new Error("Job not found");
     if (job.creatorAgentId !== params.requesterAgentId)
@@ -588,8 +597,19 @@ export async function requestChanges(params: {
         .where(eq(assignments.id, assignment.id));
     }
 
-    return { resetCount: submittedAssignments.length };
+    return {
+      resetCount: submittedAssignments.length,
+      workerIds: submittedAssignments.map(a => a.workerAgentId),
+    };
   });
+
+  await emitFeedEvent("changes_requested", params.jobId, {
+    job_id: params.jobId,
+    requester_agent_id: params.requesterAgentId,
+    reset_count: result.resetCount,
+  });
+
+  return result;
 }
 
 /**
