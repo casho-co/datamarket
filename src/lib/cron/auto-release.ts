@@ -1,8 +1,7 @@
-import { db, withTransaction, type TX } from "@/lib/db";
+import { db } from "@/lib/db";
 import {
   assignments,
   escrows,
-  jobs,
   tasks,
   gigOrders,
   bountyClaims,
@@ -21,6 +20,32 @@ import { checkAutoReleaseReady, oracleRelease } from "@/lib/bsc/escrow-contract"
 import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
 
 /**
+ * Helper: check on-chain readiness, release, then update DB.
+ * On-chain calls happen BEFORE DB updates — no locks held during RPC.
+ */
+async function releaseEscrowIfReady(
+  escrowId: string,
+  escrowStatus: string,
+  onChainTxHash: string | null,
+  now: Date
+): Promise<string | null> {
+  if (escrowStatus !== "funded" || !onChainTxHash) return null;
+
+  const ready = await checkAutoReleaseReady(escrowId);
+  if (!ready) return null;
+
+  validateEscrowTransition(escrowStatus, "released", escrowId);
+  const releaseTxHash = await oracleRelease(escrowId);
+
+  await db
+    .update(escrows)
+    .set({ status: "released", releasedAt: now, releaseTxHash })
+    .where(eq(escrows.id, escrowId));
+
+  return releaseTxHash;
+}
+
+/**
  * Auto-release escrow to workers for submitted work that hasn't been reviewed
  * within the auto-release deadline. This protects workers from unresponsive creators.
  *
@@ -32,8 +57,18 @@ export async function runAutoRelease() {
 
   // ── 1. Assignments (Jobs) ──
   const overdueAssignments = await db
-    .select()
+    .select({
+      id: assignments.id,
+      jobId: assignments.jobId,
+      workerAgentId: assignments.workerAgentId,
+      status: assignments.status,
+      escrowId: escrows.id,
+      escrowStatus: escrows.status,
+      escrowAmount: escrows.amount,
+      onChainTxHash: escrows.onChainTxHash,
+    })
     .from(assignments)
+    .leftJoin(escrows, eq(escrows.assignmentId, assignments.id))
     .where(
       and(
         eq(assignments.status, "submitted"),
@@ -42,45 +77,36 @@ export async function runAutoRelease() {
       )
     );
 
-  for (const assignment of overdueAssignments) {
+  for (const row of overdueAssignments) {
     try {
-      await withTransaction(async (tx: TX) => {
-        validateAssignmentTransition(assignment.status, "accepted", assignment.id);
-
-        const [escrow] = await tx
-          .select()
-          .from(escrows)
-          .where(eq(escrows.assignmentId, assignment.id));
-
-        if (escrow && escrow.status === "funded" && escrow.onChainTxHash) {
-          const ready = await checkAutoReleaseReady(escrow.id);
-          if (!ready) return;
-          validateEscrowTransition(escrow.status, "released", escrow.id);
-          const releaseTxHash = await oracleRelease(escrow.id);
-          await tx
-            .update(escrows)
-            .set({ status: "released", releasedAt: now, releaseTxHash })
-            .where(eq(escrows.id, escrow.id));
-
-          await tx
+      // On-chain release first
+      let didRelease = false;
+      if (row.escrowId && row.escrowStatus && row.onChainTxHash) {
+        const txHash = await releaseEscrowIfReady(row.escrowId, row.escrowStatus, row.onChainTxHash, now);
+        if (txHash) {
+          await db
             .update(reputation)
             .set({
               completedJobs: sql`${reputation.completedJobs} + 1`,
-              totalEarned: sql`(CAST(${reputation.totalEarned} AS DECIMAL) + ${parseFloat(escrow.amount)})::TEXT`,
+              totalEarned: sql`(CAST(${reputation.totalEarned} AS DECIMAL) + ${parseFloat(row.escrowAmount || "0")})::TEXT`,
               updatedAt: now,
             })
-            .where(eq(reputation.agentId, assignment.workerAgentId));
+            .where(eq(reputation.agentId, row.workerAgentId));
+          didRelease = true;
+        } else if (row.escrowStatus === "funded") {
+          continue; // Not ready for release yet, skip
         }
+      }
 
-        await tx
-          .update(assignments)
-          .set({ status: "accepted" })
-          .where(eq(assignments.id, assignment.id));
-      });
+      validateAssignmentTransition(row.status, "accepted", row.id);
+      await db
+        .update(assignments)
+        .set({ status: "accepted" })
+        .where(eq(assignments.id, row.id));
 
-      await emitFeedEvent("auto_release", assignment.jobId, {
-        job_id: assignment.jobId,
-        assignment_id: assignment.id,
+      await emitFeedEvent("auto_release", row.jobId, {
+        job_id: row.jobId,
+        assignment_id: row.id,
         reason: "Auto-released: creator did not review within deadline",
       });
 
@@ -92,7 +118,12 @@ export async function runAutoRelease() {
 
   // ── 2. Tasks ──
   const overdueTasks = await db
-    .select()
+    .select({
+      id: tasks.id,
+      status: tasks.status,
+      workerAgentId: tasks.workerAgentId,
+      escrowId: tasks.escrowId,
+    })
     .from(tasks)
     .where(
       and(
@@ -104,26 +135,16 @@ export async function runAutoRelease() {
 
   for (const task of overdueTasks) {
     try {
-      await withTransaction(async (tx: TX) => {
-        validateTaskTransition(task.status, "completed", task.id);
+      if (task.escrowId) {
+        const [escrow] = await db
+          .select({ id: escrows.id, status: escrows.status, onChainTxHash: escrows.onChainTxHash, amount: escrows.amount })
+          .from(escrows)
+          .where(eq(escrows.id, task.escrowId));
 
-        if (task.escrowId) {
-          const [escrow] = await tx
-            .select()
-            .from(escrows)
-            .where(eq(escrows.id, task.escrowId));
-
-          if (escrow && escrow.status === "funded" && escrow.onChainTxHash) {
-            const ready = await checkAutoReleaseReady(escrow.id);
-            if (!ready) return;
-            validateEscrowTransition(escrow.status, "released", escrow.id);
-            const releaseTxHash = await oracleRelease(escrow.id);
-            await tx
-              .update(escrows)
-              .set({ status: "released", releasedAt: now, releaseTxHash })
-              .where(eq(escrows.id, escrow.id));
-
-            await tx
+        if (escrow) {
+          const txHash = await releaseEscrowIfReady(escrow.id, escrow.status, escrow.onChainTxHash, now);
+          if (txHash && task.workerAgentId) {
+            await db
               .update(reputation)
               .set({
                 completedJobs: sql`${reputation.completedJobs} + 1`,
@@ -131,14 +152,17 @@ export async function runAutoRelease() {
                 updatedAt: now,
               })
               .where(eq(reputation.agentId, task.workerAgentId));
+          } else if (escrow.status === "funded" && !txHash) {
+            continue;
           }
         }
+      }
 
-        await tx
-          .update(tasks)
-          .set({ status: "completed", updatedAt: now })
-          .where(eq(tasks.id, task.id));
-      });
+      validateTaskTransition(task.status, "completed", task.id);
+      await db
+        .update(tasks)
+        .set({ status: "completed", updatedAt: now })
+        .where(eq(tasks.id, task.id));
 
       released++;
     } catch {
@@ -148,7 +172,11 @@ export async function runAutoRelease() {
 
   // ── 3. Gig Orders ──
   const overdueGigOrders = await db
-    .select()
+    .select({
+      id: gigOrders.id,
+      status: gigOrders.status,
+      escrowId: gigOrders.escrowId,
+    })
     .from(gigOrders)
     .where(
       and(
@@ -160,32 +188,23 @@ export async function runAutoRelease() {
 
   for (const order of overdueGigOrders) {
     try {
-      await withTransaction(async (tx: TX) => {
-        validateGigOrderTransition(order.status, "completed", order.id);
+      if (order.escrowId) {
+        const [escrow] = await db
+          .select({ id: escrows.id, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
+          .from(escrows)
+          .where(eq(escrows.id, order.escrowId));
 
-        if (order.escrowId) {
-          const [escrow] = await tx
-            .select()
-            .from(escrows)
-            .where(eq(escrows.id, order.escrowId));
-
-          if (escrow && escrow.status === "funded" && escrow.onChainTxHash) {
-            const ready = await checkAutoReleaseReady(escrow.id);
-            if (!ready) return;
-            validateEscrowTransition(escrow.status, "released", escrow.id);
-            const releaseTxHash = await oracleRelease(escrow.id);
-            await tx
-              .update(escrows)
-              .set({ status: "released", releasedAt: now, releaseTxHash })
-              .where(eq(escrows.id, escrow.id));
-          }
+        if (escrow) {
+          const txHash = await releaseEscrowIfReady(escrow.id, escrow.status, escrow.onChainTxHash, now);
+          if (escrow.status === "funded" && !txHash) continue;
         }
+      }
 
-        await tx
-          .update(gigOrders)
-          .set({ status: "completed", completedAt: now })
-          .where(eq(gigOrders.id, order.id));
-      });
+      validateGigOrderTransition(order.status, "completed", order.id);
+      await db
+        .update(gigOrders)
+        .set({ status: "completed", completedAt: now })
+        .where(eq(gigOrders.id, order.id));
 
       released++;
     } catch {
@@ -195,7 +214,11 @@ export async function runAutoRelease() {
 
   // ── 4. Bounty Claims ──
   const overdueClaims = await db
-    .select()
+    .select({
+      id: bountyClaims.id,
+      status: bountyClaims.status,
+      escrowId: bountyClaims.escrowId,
+    })
     .from(bountyClaims)
     .where(
       and(
@@ -207,33 +230,23 @@ export async function runAutoRelease() {
 
   for (const claim of overdueClaims) {
     try {
-      await withTransaction(async (tx: TX) => {
-        validateBountyClaimTransition(claim.status, "accepted", claim.id);
+      if (claim.escrowId) {
+        const [escrow] = await db
+          .select({ id: escrows.id, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
+          .from(escrows)
+          .where(eq(escrows.id, claim.escrowId));
 
-        // Release on-chain escrow (funds go to claimer)
-        if (claim.escrowId) {
-          const [escrow] = await tx
-            .select()
-            .from(escrows)
-            .where(eq(escrows.id, claim.escrowId));
-
-          if (escrow && escrow.status === "funded" && escrow.onChainTxHash) {
-            const ready = await checkAutoReleaseReady(escrow.id);
-            if (!ready) return;
-            validateEscrowTransition(escrow.status, "released", escrow.id);
-            const releaseTxHash = await oracleRelease(escrow.id);
-            await tx
-              .update(escrows)
-              .set({ status: "released", releasedAt: now, releaseTxHash })
-              .where(eq(escrows.id, escrow.id));
-          }
+        if (escrow) {
+          const txHash = await releaseEscrowIfReady(escrow.id, escrow.status, escrow.onChainTxHash, now);
+          if (escrow.status === "funded" && !txHash) continue;
         }
+      }
 
-        await tx
-          .update(bountyClaims)
-          .set({ status: "accepted" })
-          .where(eq(bountyClaims.id, claim.id));
-      });
+      validateBountyClaimTransition(claim.status, "accepted", claim.id);
+      await db
+        .update(bountyClaims)
+        .set({ status: "accepted" })
+        .where(eq(bountyClaims.id, claim.id));
 
       released++;
     } catch {
@@ -242,10 +255,9 @@ export async function runAutoRelease() {
   }
 
   // ── 5. On-Chain Escrow Auto-Release ──
-  // Check on-chain escrows that are funded/delivered and past dispute window
   if (ESCROW_CONTRACT_ADDRESS) {
     const onChainEscrows = await db
-      .select()
+      .select({ id: escrows.id, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
       .from(escrows)
       .where(
         and(
@@ -256,23 +268,10 @@ export async function runAutoRelease() {
 
     for (const esc of onChainEscrows) {
       try {
-        const ready = await checkAutoReleaseReady(esc.id);
-        if (ready) {
-          const releaseTxHash = await oracleRelease(esc.id);
-
-          await db
-            .update(escrows)
-            .set({
-              status: "released",
-              releasedAt: now,
-              releaseTxHash,
-            })
-            .where(eq(escrows.id, esc.id));
-
-          released++;
-        }
+        const txHash = await releaseEscrowIfReady(esc.id, esc.status, esc.onChainTxHash, now);
+        if (txHash) released++;
       } catch {
-        // Continue — on-chain operations can fail due to gas, state, etc.
+        // Continue
       }
     }
   }

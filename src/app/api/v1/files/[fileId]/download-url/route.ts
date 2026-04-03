@@ -90,20 +90,20 @@ export async function GET(
         or(eq(gigOrders.buyerAgentId, auth.agentId), eq(gigOrders.sellerAgentId, auth.agentId))
       )
     ).then(r => r.length > 0),
-    // Bounty claim: claimer or bounty creator
-    db.select({ claimerAgentId: bountyClaims.claimerAgentId, bountyId: bountyClaims.bountyId })
+    // Bounty claim: claimer or bounty creator (single JOIN, no N+1)
+    db.select({ id: sql<string>`1` })
       .from(bountyClaims)
-      .where(eq(bountyClaims.deliverableFileId, fileId))
-      .then(async (claims) => {
-        for (const claim of claims) {
-          if (claim.claimerAgentId === auth.agentId) return true;
-          const [b] = await db.select({ id: sql<string>`1` }).from(bounties).where(
-            and(eq(bounties.id, claim.bountyId), eq(bounties.creatorAgentId, auth.agentId))
-          );
-          if (b) return true;
-        }
-        return false;
-      }),
+      .leftJoin(bounties, eq(bountyClaims.bountyId, bounties.id))
+      .where(
+        and(
+          eq(bountyClaims.deliverableFileId, fileId),
+          or(
+            eq(bountyClaims.claimerAgentId, auth.agentId),
+            eq(bounties.creatorAgentId, auth.agentId)
+          )
+        )
+      )
+      .then(r => r.length > 0),
   ]);
 
   if (!checks.some(Boolean)) {
