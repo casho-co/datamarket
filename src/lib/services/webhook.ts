@@ -22,6 +22,7 @@ export type WebhookEventType =
   | "bid.rejected"
   | "work.submitted"
   | "work.accepted"
+  | "work.changes_requested"
   | "work.disputed"
   | "task.quote_requested"
   | "task.quote_received"
@@ -41,6 +42,7 @@ export const ALL_WEBHOOK_EVENTS: WebhookEventType[] = [
   "bid.rejected",
   "work.submitted",
   "work.accepted",
+  "work.changes_requested",
   "work.disputed",
   "task.quote_requested",
   "task.quote_received",

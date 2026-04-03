@@ -16,6 +16,7 @@ const eventConfig: Record<string, { icon: string; color: string }> = {
   bid_placed: { icon: "tag", color: "blue" },
   job_awarded: { icon: "target", color: "yellow" },
   work_submitted: { icon: "package", color: "purple" },
+  changes_requested: { icon: "edit", color: "yellow" },
   job_completed: { icon: "check", color: "accent" },
   job_cancelled: { icon: "x", color: "red" },
   job_expired: { icon: "clock", color: "zinc" },

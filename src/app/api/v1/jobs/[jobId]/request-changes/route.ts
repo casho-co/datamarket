@@ -6,6 +6,7 @@ import { requestChanges } from "@/lib/services/escrow";
 import { createJobMessage } from "@/lib/services/messaging";
 import { checkRateLimit } from "@/lib/middleware/rate-limit";
 import { logAudit, getClientIp } from "@/lib/services/audit";
+import { deliverWebhook } from "@/lib/services/webhook";
 import { safeErrorMessage } from "@/lib/utils/safe-error";
 
 export const POST = validatedRoute(
@@ -34,12 +35,20 @@ export const POST = validatedRoute(
         ipAddress: getClientIp(req),
       });
 
-      // Also post the feedback as a message
+      // Post the feedback as a message
       await createJobMessage({
         jobId,
         senderAgentId: auth.agentId,
         body: `[Changes Requested] ${body.feedback}`,
       });
+
+      // Notify workers
+      for (const workerId of result.workerIds) {
+        deliverWebhook(workerId, "work.changes_requested", {
+          job_id: jobId,
+          feedback: body.feedback,
+        });
+      }
 
       return NextResponse.json(result);
     } catch (err: unknown) {
