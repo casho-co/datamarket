@@ -6,9 +6,6 @@ import { submitWork } from "@/lib/services/escrow";
 import { checkRateLimit } from "@/lib/middleware/rate-limit";
 import { logAudit, getClientIp } from "@/lib/services/audit";
 import { deliverWebhook } from "@/lib/services/webhook";
-import { db } from "@/lib/db";
-import { jobs } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
 import { getNextActions } from "@/lib/utils/next-actions";
 import { safeErrorMessage } from "@/lib/utils/safe-error";
 import { validateDeliverableUrl } from "@/lib/utils/deliverable-validation";
@@ -72,9 +69,8 @@ export const POST = validatedRoute(
       });
 
       // Notify job creator
-      const [job] = await db.select().from(jobs).where(eq(jobs.id, jobId));
-      if (job) {
-        deliverWebhook(job.creatorAgentId, "work.submitted", {
+      if (result.creatorAgentId) {
+        deliverWebhook(result.creatorAgentId, "work.submitted", {
           job_id: jobId,
           assignment_id: result.id,
           type: body.type,

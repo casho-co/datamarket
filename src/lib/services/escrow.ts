@@ -267,28 +267,7 @@ export async function submitWork(params: {
   fileId?: string;
   inlineResponse?: string;
 }) {
-  const [assignment] = await db
-    .select()
-    .from(assignments)
-    .where(
-      and(
-        eq(assignments.jobId, params.jobId),
-        eq(assignments.workerAgentId, params.workerAgentId),
-        eq(assignments.status, "in_progress")
-      )
-    );
-  if (!assignment) throw new Error("No active assignment found");
-
-  // Check revision cap
-  const [job] = await db.select().from(jobs).where(eq(jobs.id, params.jobId));
-  if (!job) throw new Error("Job not found");
-  if (assignment.revisionCount >= job.maxRevisions) {
-    throw new Error(
-      `Maximum revisions reached (${job.maxRevisions}). No further submissions allowed.`
-    );
-  }
-
-  // If file type, verify the file belongs to this agent
+  // Pre-validate file ownership outside transaction (avoids holding lock during file check)
   let resolvedUrl = params.deliverableUrl || null;
   if (params.type === "file" && params.fileId) {
     const [file] = await db
@@ -301,50 +280,86 @@ export async function submitWork(params: {
     resolvedUrl = `r2://${file.fileKey}`;
   }
 
-  validateAssignmentTransition(assignment.status, "submitted", assignment.id);
+  // ── DB transaction — assignment update + history insert atomic ──
+  const result = await withTransaction(async (tx: TX) => {
+    const [assignment] = await tx
+      .select()
+      .from(assignments)
+      .where(
+        and(
+          eq(assignments.jobId, params.jobId),
+          eq(assignments.workerAgentId, params.workerAgentId),
+          eq(assignments.status, "in_progress")
+        )
+      );
+    if (!assignment) throw new Error("No active assignment found");
 
-  const now = new Date();
-  const newRevision = assignment.revisionCount + 1;
+    // Check deadline
+    if (assignment.deadlineAt && new Date(assignment.deadlineAt) < new Date()) {
+      throw new Error("Assignment deadline has passed");
+    }
 
-  const autoReleaseAt = new Date(
-    now.getTime() + job.autoReleaseDays * 24 * 60 * 60 * 1000
-  );
+    // Check revision cap
+    const [job] = await tx.select().from(jobs).where(eq(jobs.id, params.jobId));
+    if (!job) throw new Error("Job not found");
+    if (assignment.revisionCount >= job.maxRevisions) {
+      throw new Error(
+        `Maximum revisions reached (${job.maxRevisions}). No further submissions allowed.`
+      );
+    }
 
-  const [updated] = await db
-    .update(assignments)
-    .set({
-      status: "submitted",
+    validateAssignmentTransition(assignment.status, "submitted", assignment.id);
+
+    const now = new Date();
+    const newRevision = assignment.revisionCount + 1;
+
+    const autoReleaseAt = new Date(
+      now.getTime() + job.autoReleaseDays * 24 * 60 * 60 * 1000
+    );
+
+    const [updated] = await tx
+      .update(assignments)
+      .set({
+        status: "submitted",
+        deliverableType: params.type,
+        deliverableUrl: resolvedUrl,
+        deliverableHash: params.deliverableHash || null,
+        deliverableFileId: params.fileId || null,
+        inlineResponse: params.inlineResponse || null,
+        revisionCount: newRevision,
+        submittedAt: now,
+        autoReleaseAt,
+      })
+      .where(eq(assignments.id, assignment.id))
+      .returning();
+
+    // Record in submission history (atomic with assignment update)
+    await tx.insert(submissionHistory).values({
+      assignmentId: assignment.id,
+      submitterAgentId: params.workerAgentId,
+      revision: newRevision,
       deliverableType: params.type,
       deliverableUrl: resolvedUrl,
       deliverableHash: params.deliverableHash || null,
       deliverableFileId: params.fileId || null,
       inlineResponse: params.inlineResponse || null,
-      revisionCount: newRevision,
-      submittedAt: now,
-      autoReleaseAt,
-    })
-    .where(eq(assignments.id, assignment.id))
-    .returning();
+    });
 
-  // Record in submission history
-  await db.insert(submissionHistory).values({
-    assignmentId: assignment.id,
-    submitterAgentId: params.workerAgentId,
-    revision: newRevision,
-    deliverableType: params.type,
-    deliverableUrl: resolvedUrl,
-    deliverableHash: params.deliverableHash || null,
-    deliverableFileId: params.fileId || null,
-    inlineResponse: params.inlineResponse || null,
+    return {
+      updated,
+      assignmentId: assignment.id,
+      newRevision,
+      creatorAgentId: job.creatorAgentId,
+    };
   });
 
-  // Mark delivered on-chain (non-blocking, best-effort)
+  // ── On-chain markDelivered (best-effort, after transaction) ──
   const delivContent = params.inlineResponse || params.deliverableHash || params.deliverableUrl || params.jobId;
   try {
     const [escrow] = await db
       .select()
       .from(escrows)
-      .where(eq(escrows.assignmentId, assignment.id));
+      .where(eq(escrows.assignmentId, result.assignmentId));
     if (escrow && escrow.onChainTxHash) {
       const delivHash = hashDeliverable(delivContent!);
       await onChainMarkDelivered(escrow.refId, delivHash);
@@ -355,13 +370,13 @@ export async function submitWork(params: {
 
   await emitFeedEvent("work_submitted", params.jobId, {
     job_id: params.jobId,
-    assignment_id: assignment.id,
+    assignment_id: result.assignmentId,
     worker_agent_id: params.workerAgentId,
-    revision: newRevision,
+    revision: result.newRevision,
     type: params.type,
   });
 
-  return updated;
+  return { ...result.updated, creatorAgentId: result.creatorAgentId };
 }
 
 export async function acceptWork(params: {
