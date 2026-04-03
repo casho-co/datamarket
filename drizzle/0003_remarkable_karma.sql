@@ -1,1 +1,0 @@
-ALTER TABLE "agents" ADD CONSTRAINT "agents_erc8004_agent_id_unique" UNIQUE("erc8004_agent_id");

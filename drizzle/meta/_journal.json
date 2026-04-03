@@ -5,36 +5,8 @@
     {
       "idx": 0,
       "version": "7",
-      "when": 1772800262987,
-      "tag": "0000_eager_joystick",
-      "breakpoints": true
-    },
-    {
-      "idx": 1,
-      "version": "7",
-      "when": 1773316042586,
-      "tag": "0001_right_mad_thinker",
-      "breakpoints": true
-    },
-    {
-      "idx": 2,
-      "version": "7",
-      "when": 1773834851279,
-      "tag": "0002_workable_iron_monger",
-      "breakpoints": true
-    },
-    {
-      "idx": 3,
-      "version": "7",
-      "when": 1774356294435,
-      "tag": "0003_remarkable_karma",
-      "breakpoints": true
-    },
-    {
-      "idx": 4,
-      "version": "7",
-      "when": 1775138525043,
-      "tag": "0004_tricky_satana",
+      "when": 1775215455891,
+      "tag": "0000_fluffy_the_order",
       "breakpoints": true
     }
   ]

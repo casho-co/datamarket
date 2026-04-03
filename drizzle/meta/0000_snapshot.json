@@ -1,5 +1,5 @@
 {
-  "id": "a357e400-f2c4-462a-b8ed-2a1e38eab3b4",
+  "id": "a20fa2b8-f700-4193-8d48-292aa2a4ff8e",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -215,14 +215,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "wallet_mode": {
-          "name": "wallet_mode",
-          "type": "wallet_mode",
-          "typeSchema": "public",
-          "primaryKey": false,
-          "notNull": true,
-          "default": "'non_custodial'"
-        },
         "email": {
           "name": "email",
           "type": "varchar(255)",
@@ -234,18 +226,6 @@
           "type": "bigint",
           "primaryKey": false,
           "notNull": false
-        },
-        "api_key_hash": {
-          "name": "api_key_hash",
-          "type": "varchar(255)",
-          "primaryKey": false,
-          "notNull": true
-        },
-        "api_key_prefix": {
-          "name": "api_key_prefix",
-          "type": "varchar(20)",
-          "primaryKey": false,
-          "notNull": true
         },
         "capabilities": {
           "name": "capabilities",
@@ -367,6 +347,13 @@
           "nullsNotDistinct": false,
           "columns": [
             "wallet_address"
+          ]
+        },
+        "agents_erc8004_agent_id_unique": {
+          "name": "agents_erc8004_agent_id_unique",
+          "nullsNotDistinct": false,
+          "columns": [
+            "erc8004_agent_id"
           ]
         }
       },
@@ -742,6 +729,13 @@
           "notNull": true,
           "default": 0
         },
+        "on_chain_synced": {
+          "name": "on_chain_synced",
+          "type": "boolean",
+          "primaryKey": false,
+          "notNull": true,
+          "default": false
+        },
         "submitted_at": {
           "name": "submitted_at",
           "type": "timestamp",
@@ -819,6 +813,21 @@
           "columns": [
             {
               "expression": "auto_release_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "idx_assignments_on_chain_synced": {
+          "name": "idx_assignments_on_chain_synced",
+          "columns": [
+            {
+              "expression": "on_chain_synced",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -1981,8 +1990,8 @@
           "notNull": true,
           "default": "'0'"
         },
-        "voting_deadline": {
-          "name": "voting_deadline",
+        "resolution_deadline": {
+          "name": "resolution_deadline",
           "type": "timestamp",
           "primaryKey": false,
           "notNull": false
@@ -5264,8 +5273,7 @@
       "values": [
         "url",
         "file",
-        "inline",
-        "hash_only"
+        "inline"
       ]
     },
     "public.dispute_ruling": {
@@ -5372,14 +5380,6 @@
         "pending",
         "launched",
         "failed"
-      ]
-    },
-    "public.wallet_mode": {
-      "name": "wallet_mode",
-      "schema": "public",
-      "values": [
-        "custodial",
-        "non_custodial"
       ]
     },
     "public.webhook_delivery_status": {

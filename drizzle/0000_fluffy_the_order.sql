@@ -4,7 +4,7 @@ CREATE TYPE "public"."availability_status" AS ENUM('online', 'offline', 'busy');
 CREATE TYPE "public"."bid_status" AS ENUM('pending', 'accepted', 'rejected', 'withdrawn');--> statement-breakpoint
 CREATE TYPE "public"."bounty_claim_status" AS ENUM('active', 'submitted', 'accepted', 'rejected');--> statement-breakpoint
 CREATE TYPE "public"."bounty_status" AS ENUM('open', 'claimed', 'completed', 'expired', 'cancelled');--> statement-breakpoint
-CREATE TYPE "public"."deliverable_type" AS ENUM('url', 'file', 'inline', 'hash_only');--> statement-breakpoint
+CREATE TYPE "public"."deliverable_type" AS ENUM('url', 'file', 'inline');--> statement-breakpoint
 CREATE TYPE "public"."dispute_ruling" AS ENUM('pending', 'requester_wins', 'worker_wins', 'split', 'redo');--> statement-breakpoint
 CREATE TYPE "public"."escrow_ref_type" AS ENUM('job', 'task', 'gig_order', 'bounty_claim');--> statement-breakpoint
 CREATE TYPE "public"."escrow_status" AS ENUM('funded', 'released', 'refunded', 'disputed');--> statement-breakpoint
@@ -15,7 +15,6 @@ CREATE TYPE "public"."job_status" AS ENUM('open', 'in_progress', 'completed', 'c
 CREATE TYPE "public"."job_type" AS ENUM('standard', 'competition');--> statement-breakpoint
 CREATE TYPE "public"."task_status" AS ENUM('requested', 'quoted', 'accepted', 'in_progress', 'submitted', 'completed', 'disputed', 'cancelled', 'rejected');--> statement-breakpoint
 CREATE TYPE "public"."token_launch_status" AS ENUM('pending', 'launched', 'failed');--> statement-breakpoint
-CREATE TYPE "public"."wallet_mode" AS ENUM('custodial', 'non_custodial');--> statement-breakpoint
 CREATE TYPE "public"."webhook_delivery_status" AS ENUM('pending', 'delivered', 'failed');--> statement-breakpoint
 CREATE TABLE "agent_delegations" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
@@ -34,11 +33,8 @@ CREATE TABLE "agents" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"handle" varchar(20),
 	"wallet_address" varchar(42) NOT NULL,
-	"wallet_mode" "wallet_mode" DEFAULT 'non_custodial' NOT NULL,
 	"email" varchar(255),
 	"erc8004_agent_id" bigint,
-	"api_key_hash" varchar(255) NOT NULL,
-	"api_key_prefix" varchar(20) NOT NULL,
 	"capabilities" jsonb,
 	"tags" jsonb,
 	"skill_tags" jsonb,
@@ -51,7 +47,8 @@ CREATE TABLE "agents" (
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"updated_at" timestamp DEFAULT now() NOT NULL,
 	CONSTRAINT "agents_handle_unique" UNIQUE("handle"),
-	CONSTRAINT "agents_wallet_address_unique" UNIQUE("wallet_address")
+	CONSTRAINT "agents_wallet_address_unique" UNIQUE("wallet_address"),
+	CONSTRAINT "agents_erc8004_agent_id_unique" UNIQUE("erc8004_agent_id")
 );
 --> statement-breakpoint
 CREATE TABLE "api_keys" (
@@ -91,6 +88,7 @@ CREATE TABLE "assignments" (
 	"deliverable_file_id" uuid,
 	"inline_response" text,
 	"revision_count" integer DEFAULT 0 NOT NULL,
+	"on_chain_synced" boolean DEFAULT false NOT NULL,
 	"submitted_at" timestamp,
 	"auto_release_at" timestamp,
 	"deadline_at" timestamp NOT NULL,
@@ -207,7 +205,7 @@ CREATE TABLE "disputes" (
 	"ruling" "dispute_ruling" DEFAULT 'pending' NOT NULL,
 	"split_bps" integer,
 	"deposit_amount" varchar(50) DEFAULT '0' NOT NULL,
-	"voting_deadline" timestamp,
+	"resolution_deadline" timestamp,
 	"created_at" timestamp DEFAULT now() NOT NULL,
 	"resolved_at" timestamp
 );
@@ -588,6 +586,7 @@ CREATE INDEX "idx_assignments_job" ON "assignments" USING btree ("job_id");--> s
 CREATE INDEX "idx_assignments_worker" ON "assignments" USING btree ("worker_agent_id");--> statement-breakpoint
 CREATE INDEX "idx_assignments_status" ON "assignments" USING btree ("status");--> statement-breakpoint
 CREATE INDEX "idx_assignments_auto_release" ON "assignments" USING btree ("auto_release_at");--> statement-breakpoint
+CREATE INDEX "idx_assignments_on_chain_synced" ON "assignments" USING btree ("on_chain_synced");--> statement-breakpoint
 CREATE INDEX "idx_audit_agent" ON "audit_logs" USING btree ("agent_id");--> statement-breakpoint
 CREATE INDEX "idx_audit_action" ON "audit_logs" USING btree ("action");--> statement-breakpoint
 CREATE INDEX "idx_audit_created" ON "audit_logs" USING btree ("created_at");--> statement-breakpoint
