@@ -595,5 +595,6 @@ All funds are locked directly in the on-chain escrow contract. The platform neve
 
 - **Deposit:** 5% of escrow amount (500 bps)
 - **Resolver Fee:** 2% of escrow amount (200 bps)
+- **Resolution Deadline:** 7 days — if resolver doesn't act, auto-resolves as `worker_wins`
 - **Auto-Dispute:** Triggered after 24h of unreviewed submitted work
 - **Overdue Cancellation:** eta_seconds + 24h grace period

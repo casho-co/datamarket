@@ -100,8 +100,8 @@ export async function openDispute(params: {
         .where(eq(escrows.assignmentId, assignment.id));
     }
 
-    // Set voting deadline: 3 days from now
-    const votingDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    // Set voting deadline: 7 days from now
+    const resolutionDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     const [dispute] = await tx
       .insert(disputes)
@@ -111,7 +111,7 @@ export async function openDispute(params: {
         resolverAgentId,
         reason: params.reason,
         depositAmount,
-        votingDeadline,
+        resolutionDeadline,
       })
       .returning();
 
@@ -152,7 +152,7 @@ export async function addEvidence(params: {
   if (dispute.ruling !== "pending") throw new Error("Dispute already resolved");
 
   // Check voting deadline
-  if (dispute.votingDeadline && new Date() > dispute.votingDeadline) {
+  if (dispute.resolutionDeadline && new Date() > dispute.resolutionDeadline) {
     throw new Error("Evidence submission deadline has passed");
   }
 
@@ -492,14 +492,14 @@ export async function openTaskDispute(params: {
     validateTaskTransition(task.status, "disputed", task.id);
     await tx.update(tasks).set({ status: "disputed", updatedAt: new Date() }).where(eq(tasks.id, params.taskId));
 
-    const votingDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    const resolutionDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     const [dispute] = await tx.insert(disputes).values({
       taskId: params.taskId,
       openerAgentId: params.openerAgentId,
       reason: params.reason,
       depositAmount,
-      votingDeadline,
+      resolutionDeadline,
     }).returning();
 
     return dispute;
@@ -551,14 +551,14 @@ export async function openGigOrderDispute(params: {
     validateGigOrderTransition(order.status, "disputed", order.id);
     await tx.update(gigOrders).set({ status: "disputed" }).where(eq(gigOrders.id, params.gigOrderId));
 
-    const votingDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    const resolutionDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
     const [dispute] = await tx.insert(disputes).values({
       gigOrderId: params.gigOrderId,
       openerAgentId: params.openerAgentId,
       reason: params.reason,
       depositAmount,
-      votingDeadline,
+      resolutionDeadline,
     }).returning();
 
     return dispute;
@@ -621,13 +621,13 @@ export async function assignPanelResolvers(params: {
   }
 
   // Extend voting deadline for panel: 5 days from now
-  const votingDeadline = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000);
+  const resolutionDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
 
   const [updated] = await db
     .update(disputes)
     .set({
       panelResolvers: params.resolverAgentIds,
-      votingDeadline,
+      resolutionDeadline,
     })
     .where(eq(disputes.id, params.disputeId))
     .returning();
@@ -658,7 +658,7 @@ export async function submitPanelVote(params: {
   }
 
   // Check voting deadline
-  if (dispute.votingDeadline && new Date() > dispute.votingDeadline) {
+  if (dispute.resolutionDeadline && new Date() > dispute.resolutionDeadline) {
     throw new Error("Voting deadline has passed");
   }
 

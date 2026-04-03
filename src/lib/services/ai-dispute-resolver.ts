@@ -32,7 +32,7 @@ interface DisputeContext {
     reason: string;
     depositAmount: string;
     createdAt: Date;
-    votingDeadline: Date | null;
+    resolutionDeadline: Date | null;
   };
   job: {
     id: string;
@@ -160,7 +160,7 @@ async function gatherDisputeContext(disputeId: string): Promise<DisputeContext |
       reason: dispute.reason,
       depositAmount: dispute.depositAmount,
       createdAt: dispute.createdAt,
-      votingDeadline: dispute.votingDeadline,
+      resolutionDeadline: dispute.resolutionDeadline,
     },
     job: {
       id: job.id,

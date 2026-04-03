@@ -16,8 +16,8 @@ export async function runDisputeDeadline() {
     .where(
       and(
         eq(disputes.ruling, "pending"),
-        isNotNull(disputes.votingDeadline),
-        lte(disputes.votingDeadline, now)
+        isNotNull(disputes.resolutionDeadline),
+        lte(disputes.resolutionDeadline, now)
       )
     );
 

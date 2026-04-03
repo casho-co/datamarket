@@ -631,7 +631,7 @@ export const disputes = pgTable(
     depositAmount: varchar("deposit_amount", { length: 50 })
       .default("0")
       .notNull(),
-    votingDeadline: timestamp("voting_deadline"),
+    resolutionDeadline: timestamp("resolution_deadline"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
     resolvedAt: timestamp("resolved_at"),
   },
