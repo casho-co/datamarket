@@ -37,10 +37,23 @@ export async function openDispute(params: {
   openerAgentId: string;
   reason: string;
 }) {
-  const result = await withTransaction(async (tx: TX) => {
-    const [job] = await tx.select().from(jobs).where(eq(jobs.id, params.jobId));
-    if (!job) throw new Error("Job not found");
+  // ── Pre-validate: resolve resolver BEFORE transaction ──
+  const [job] = await db.select().from(jobs).where(eq(jobs.id, params.jobId));
+  if (!job) throw new Error("Job not found");
 
+  let resolverAgentId = job.disputeAgentId || null;
+  if (!resolverAgentId) {
+    const [aiResolver] = await db
+      .select({ id: agents.id })
+      .from(agents)
+      .where(eq(agents.handle, "datalayer_resolver"));
+    if (!aiResolver) {
+      throw new Error("No dispute resolver available. Platform resolver not configured.");
+    }
+    resolverAgentId = aiResolver.id;
+  }
+
+  const result = await withTransaction(async (tx: TX) => {
     const [assignment] = await tx
       .select()
       .from(assignments)
@@ -85,21 +98,10 @@ export async function openDispute(params: {
         .update(escrows)
         .set({ status: "disputed" })
         .where(eq(escrows.assignmentId, assignment.id));
-
     }
 
     // Set voting deadline: 3 days from now
     const votingDeadline = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
-
-    // Determine resolver: job-specific > AI default resolver
-    let resolverAgentId = job.disputeAgentId || null;
-    if (!resolverAgentId) {
-      const [aiResolver] = await tx
-        .select()
-        .from(agents)
-        .where(eq(agents.handle, "datalayer_resolver"));
-      if (aiResolver) resolverAgentId = aiResolver.id;
-    }
 
     const [dispute] = await tx
       .insert(disputes)
