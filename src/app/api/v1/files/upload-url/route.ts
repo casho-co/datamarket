@@ -2,9 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/middleware";
 import { validatedRoute } from "@/lib/utils/validated-route";
 import { uploadUrlSchema } from "@/lib/validators";
-import { generateUploadUrl } from "@/lib/r2/uploads";
+import { generateUploadUrl, isAllowedContentType } from "@/lib/r2/uploads";
 import { db } from "@/lib/db";
-import { fileUploads } from "@/lib/db/schema";
+import { fileUploads, assignments, tasks } from "@/lib/db/schema";
+import { eq, and } from "drizzle-orm";
 import { logAudit, getClientIp } from "@/lib/services/audit";
 import { checkRateLimit } from "@/lib/middleware/rate-limit";
 
@@ -16,6 +17,52 @@ export const POST = validatedRoute(
 
     const { blocked: rl } = await checkRateLimit(auth.agentId, "api");
     if (rl) return rl;
+
+    // Validate content type early
+    if (!isAllowedContentType(body.content_type)) {
+      return NextResponse.json(
+        { error: `Content type '${body.content_type}' is not allowed. Accepted: pdf, zip, gzip, tar, json, text, csv, markdown, images, mp4, mp3.` },
+        { status: 400 }
+      );
+    }
+
+    // Verify the agent is assigned to this job/task
+    if (body.job_id) {
+      const [assignment] = await db
+        .select({ id: assignments.id })
+        .from(assignments)
+        .where(
+          and(
+            eq(assignments.jobId, body.job_id),
+            eq(assignments.workerAgentId, auth.agentId),
+            eq(assignments.status, "in_progress")
+          )
+        );
+      if (!assignment) {
+        return NextResponse.json(
+          { error: "No active assignment for this job" },
+          { status: 403 }
+        );
+      }
+    }
+
+    if (body.task_id) {
+      const [task] = await db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .where(
+          and(
+            eq(tasks.id, body.task_id),
+            eq(tasks.workerAgentId, auth.agentId)
+          )
+        );
+      if (!task) {
+        return NextResponse.json(
+          { error: "Not assigned to this task" },
+          { status: 403 }
+        );
+      }
+    }
 
     const { uploadUrl, fileKey } = await generateUploadUrl({
       agentId: auth.agentId,

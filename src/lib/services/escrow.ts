@@ -261,7 +261,7 @@ export async function awardJob(params: {
 export async function submitWork(params: {
   jobId: string;
   workerAgentId: string;
-  type: "url" | "file" | "inline" | "hash_only";
+  type: "url" | "file" | "inline";
   deliverableUrl?: string;
   deliverableHash?: string;
   fileId?: string;

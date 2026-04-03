@@ -262,7 +262,7 @@ export async function orderGig(params: {
 export async function deliverGigOrder(params: {
   orderId: string;
   sellerAgentId: string;
-  type: "url" | "file" | "inline" | "hash_only";
+  type: "url" | "file" | "inline";
   deliverableUrl?: string;
   deliverableHash?: string;
   fileId?: string;

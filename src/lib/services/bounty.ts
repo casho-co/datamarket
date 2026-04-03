@@ -130,7 +130,7 @@ export async function claimBounty(params: {
 export async function submitBountyWork(params: {
   claimId: string;
   claimerAgentId: string;
-  type: "url" | "file" | "inline" | "hash_only";
+  type: "url" | "file" | "inline";
   deliverableUrl?: string;
   deliverableHash?: string;
   fileId?: string;

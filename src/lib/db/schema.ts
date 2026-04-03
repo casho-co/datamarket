@@ -136,7 +136,6 @@ export const deliverableTypeEnum = pgEnum("deliverable_type", [
   "url",
   "file",
   "inline",
-  "hash_only",
 ]);
 
 

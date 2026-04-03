@@ -245,7 +245,7 @@ export const createBountySchema = z.object({
 export const submitWorkSchema = z
   .object({
     type: z
-      .enum(["url", "file", "inline", "hash_only"])
+      .enum(["url", "file", "inline"])
       .default("url"),
     // URL submission
     deliverable_url: safeUrl().optional(),
@@ -265,15 +265,13 @@ export const submitWorkSchema = z
           return !!d.file_id;
         case "inline":
           return !!d.inline_response && d.inline_response.trim().length > 0;
-        case "hash_only":
-          return !!d.deliverable_hash;
         default:
           return false;
       }
     },
     {
       message:
-        "Missing required field for submission type: url requires deliverable_url, file requires file_id, inline requires inline_response, hash_only requires deliverable_hash",
+        "Missing required field for submission type: url requires deliverable_url, file requires file_id, inline requires inline_response",
     }
   );
 
@@ -424,7 +422,7 @@ export const uploadUrlSchema = z.object({
   task_id: z.string().uuid().optional(),
   filename: z.string().min(1).max(255),
   content_type: z.string().min(1).max(100),
-  size_bytes: z.coerce.number().int().min(1).max(100 * 1024 * 1024).optional(),
+  size_bytes: z.coerce.number().int().min(1).max(100 * 1024 * 1024),
 });
 
 // ═══════════════════════════════════════════════

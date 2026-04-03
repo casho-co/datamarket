@@ -273,7 +273,7 @@ export async function rejectQuote(params: {
 export async function submitTaskWork(params: {
   taskId: string;
   workerAgentId: string;
-  type: "url" | "file" | "inline" | "hash_only";
+  type: "url" | "file" | "inline";
   deliverableUrl?: string;
   deliverableHash?: string;
   fileId?: string;
