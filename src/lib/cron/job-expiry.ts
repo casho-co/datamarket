@@ -1,4 +1,4 @@
-import { db, withTransaction, type TX } from "@/lib/db";
+import { db } from "@/lib/db";
 import { jobs, assignments, escrows } from "@/lib/db/schema";
 import { eq, and, lte } from "drizzle-orm";
 import { emitFeedEvent } from "@/lib/services/feed";
@@ -10,7 +10,7 @@ export async function runJobExpiry() {
 
   // Only expire verified, open jobs (unverified have no money, no expiry needed)
   const expiredJobs = await db
-    .select()
+    .select({ id: jobs.id, status: jobs.status, title: jobs.title })
     .from(jobs)
     .where(
       and(eq(jobs.status, "open"), eq(jobs.verified, true), lte(jobs.expiresAt, now))
@@ -20,42 +20,39 @@ export async function runJobExpiry() {
 
   for (const job of expiredJobs) {
     try {
-      await withTransaction(async (tx: TX) => {
-        // Refund the on-chain escrow
-        const [jobEscrow] = await tx
-          .select()
-          .from(escrows)
-          .where(
-            and(eq(escrows.refId, job.id), eq(escrows.refType, "job"), eq(escrows.status, "funded"))
-          );
+      // Find and refund escrow on-chain BEFORE DB updates
+      const [jobEscrow] = await db
+        .select({ id: escrows.id, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
+        .from(escrows)
+        .where(
+          and(eq(escrows.refId, job.id), eq(escrows.refType, "job"), eq(escrows.status, "funded"))
+        );
 
-        if (jobEscrow && jobEscrow.onChainTxHash) {
-          validateEscrowTransition(jobEscrow.status, "refunded", jobEscrow.id);
-          const refundTxHash = await oracleRefund(jobEscrow.id);
-          await tx
-            .update(escrows)
-            .set({ status: "refunded", refundedAt: now, releaseTxHash: refundTxHash })
-            .where(eq(escrows.id, jobEscrow.id));
-        }
+      if (jobEscrow?.onChainTxHash) {
+        validateEscrowTransition(jobEscrow.status, "refunded", jobEscrow.id);
+        const refundTxHash = await oracleRefund(jobEscrow.id);
+        await db
+          .update(escrows)
+          .set({ status: "refunded", refundedAt: now, releaseTxHash: refundTxHash })
+          .where(eq(escrows.id, jobEscrow.id));
+      }
 
-        // Cancel active assignments
-        await tx
-          .update(assignments)
-          .set({ status: "cancelled" })
-          .where(
-            and(
-              eq(assignments.jobId, job.id),
-              eq(assignments.status, "in_progress")
-            )
-          );
+      // DB updates after on-chain success
+      await db
+        .update(assignments)
+        .set({ status: "cancelled" })
+        .where(
+          and(
+            eq(assignments.jobId, job.id),
+            eq(assignments.status, "in_progress")
+          )
+        );
 
-        // Mark job expired
-        validateJobTransition(job.status, "expired", job.id);
-        await tx
-          .update(jobs)
-          .set({ status: "expired", updatedAt: now })
-          .where(eq(jobs.id, job.id));
-      });
+      validateJobTransition(job.status, "expired", job.id);
+      await db
+        .update(jobs)
+        .set({ status: "expired", updatedAt: now })
+        .where(eq(jobs.id, job.id));
 
       await emitFeedEvent("job_expired", job.id, {
         job_id: job.id,
@@ -64,7 +61,7 @@ export async function runJobExpiry() {
 
       processed++;
     } catch {
-      // Log but continue processing other jobs
+      // Continue processing other jobs
     }
   }
 

@@ -88,7 +88,6 @@ CREATE TABLE "assignments" (
 	"deliverable_file_id" uuid,
 	"inline_response" text,
 	"revision_count" integer DEFAULT 0 NOT NULL,
-	"on_chain_synced" boolean DEFAULT false NOT NULL,
 	"submitted_at" timestamp,
 	"auto_release_at" timestamp,
 	"deadline_at" timestamp NOT NULL,
@@ -586,7 +585,6 @@ CREATE INDEX "idx_assignments_job" ON "assignments" USING btree ("job_id");--> s
 CREATE INDEX "idx_assignments_worker" ON "assignments" USING btree ("worker_agent_id");--> statement-breakpoint
 CREATE INDEX "idx_assignments_status" ON "assignments" USING btree ("status");--> statement-breakpoint
 CREATE INDEX "idx_assignments_auto_release" ON "assignments" USING btree ("auto_release_at");--> statement-breakpoint
-CREATE INDEX "idx_assignments_on_chain_synced" ON "assignments" USING btree ("on_chain_synced");--> statement-breakpoint
 CREATE INDEX "idx_audit_agent" ON "audit_logs" USING btree ("agent_id");--> statement-breakpoint
 CREATE INDEX "idx_audit_action" ON "audit_logs" USING btree ("action");--> statement-breakpoint
 CREATE INDEX "idx_audit_created" ON "audit_logs" USING btree ("created_at");--> statement-breakpoint

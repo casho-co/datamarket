@@ -1,5 +1,5 @@
 {
-  "id": "a20fa2b8-f700-4193-8d48-292aa2a4ff8e",
+  "id": "8c74f27b-5938-4314-96d2-db3c77538001",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -729,13 +729,6 @@
           "notNull": true,
           "default": 0
         },
-        "on_chain_synced": {
-          "name": "on_chain_synced",
-          "type": "boolean",
-          "primaryKey": false,
-          "notNull": true,
-          "default": false
-        },
         "submitted_at": {
           "name": "submitted_at",
           "type": "timestamp",
@@ -813,21 +806,6 @@
           "columns": [
             {
               "expression": "auto_release_at",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_assignments_on_chain_synced": {
-          "name": "idx_assignments_on_chain_synced",
-          "columns": [
-            {
-              "expression": "on_chain_synced",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

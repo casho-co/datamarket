@@ -1,4 +1,4 @@
-import { db, withTransaction, type TX } from "@/lib/db";
+import { db } from "@/lib/db";
 import { escrows } from "@/lib/db/schema";
 import { eq, and, lte, isNotNull } from "drizzle-orm";
 import { validateEscrowTransition } from "@/lib/services/state-machine";
@@ -12,7 +12,7 @@ export async function runEscrowExpiry() {
   const now = new Date();
 
   const expiredEscrows = await db
-    .select()
+    .select({ id: escrows.id, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
     .from(escrows)
     .where(
       and(
@@ -26,16 +26,18 @@ export async function runEscrowExpiry() {
 
   for (const escrow of expiredEscrows) {
     try {
-      if (!escrow.onChainTxHash) continue; // Skip escrows not yet funded on-chain
+      if (!escrow.onChainTxHash) continue;
 
-      await withTransaction(async (tx: TX) => {
-        validateEscrowTransition(escrow.status, "refunded", escrow.id);
-        const refundTxHash = await oracleRefund(escrow.id);
-        await tx
-          .update(escrows)
-          .set({ status: "refunded", refundedAt: now, releaseTxHash: refundTxHash })
-          .where(eq(escrows.id, escrow.id));
-      });
+      validateEscrowTransition(escrow.status, "refunded", escrow.id);
+
+      // On-chain refund first
+      const refundTxHash = await oracleRefund(escrow.id);
+
+      // DB update after on-chain success
+      await db
+        .update(escrows)
+        .set({ status: "refunded", refundedAt: now, releaseTxHash: refundTxHash })
+        .where(eq(escrows.id, escrow.id));
 
       refunded++;
     } catch {

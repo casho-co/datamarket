@@ -97,66 +97,64 @@ export async function awardJob(params: {
   bidId: string;
   requesterAgentId: string;
 }) {
-  // ── DB transaction — no RPC calls, short lock ──
+  // ── Pre-validate with reads (no locks) ──
+  const [job] = await db
+    .select({
+      id: jobs.id,
+      creatorAgentId: jobs.creatorAgentId,
+      status: jobs.status,
+      verified: jobs.verified,
+      budgetAmount: jobs.budgetAmount,
+      title: jobs.title,
+    })
+    .from(jobs)
+    .where(eq(jobs.id, params.jobId));
+  if (!job) throw new Error("Job not found");
+  if (job.creatorAgentId !== params.requesterAgentId) throw new Error("Not job creator");
+  if (job.status !== "open") throw new Error("Job not open for awarding");
+  if (!job.verified) throw new Error("Job not yet funded on-chain");
+
+  const [bid] = await db.select().from(bids).where(eq(bids.id, params.bidId));
+  if (!bid) throw new Error("Bid not found");
+  if (bid.jobId !== params.jobId) throw new Error("Bid not for this job");
+  if (bid.status !== "pending") throw new Error("Bid not pending");
+
+  const amount = bid.amount;
+  const parsedAmount = parseFloat(amount);
+  if (!job.budgetAmount) throw new Error("Job has no budget set");
+  const parsedBudget = parseFloat(job.budgetAmount);
+  if (parsedAmount > parsedBudget) throw new Error("Bid amount exceeds job budget");
+
+  const [escrow] = await db
+    .select()
+    .from(escrows)
+    .where(and(eq(escrows.refId, params.jobId), eq(escrows.refType, "job"), eq(escrows.status, "funded")));
+  if (!escrow) throw new Error("Job escrow not found — job may not be funded");
+
+  const [recipient] = await db
+    .select({ walletAddress: agents.walletAddress })
+    .from(agents)
+    .where(eq(agents.id, bid.bidderAgentId));
+  if (!recipient?.walletAddress) throw new Error("Worker has no wallet address");
+
+  // ── On-chain call BEFORE DB transaction ──
+  if (ESCROW_CONTRACT_ADDRESS) {
+    if (parsedAmount < parsedBudget) {
+      await oracleAssignSellerAndAdjust(params.jobId, recipient.walletAddress, amount);
+    } else {
+      await oracleAssignSeller(params.jobId, recipient.walletAddress);
+    }
+  }
+
+  // ── DB transaction — short, no RPC ──
   const result = await withTransaction(async (tx: TX) => {
-    // Row lock to prevent concurrent awards
-    const [job] = await tx
-      .select({
-        id: jobs.id,
-        creatorAgentId: jobs.creatorAgentId,
-        status: jobs.status,
-        verified: jobs.verified,
-        budgetAmount: jobs.budgetAmount,
-        title: jobs.title,
-      })
+    // Re-validate job is still open (could have changed between pre-validate and now)
+    const [j] = await tx
+      .select({ status: jobs.status })
       .from(jobs)
       .where(eq(jobs.id, params.jobId))
       .for("update");
-    if (!job) throw new Error("Job not found");
-    if (job.creatorAgentId !== params.requesterAgentId)
-      throw new Error("Not job creator");
-    if (job.status !== "open")
-      throw new Error("Job not open for awarding");
-    if (!job.verified)
-      throw new Error("Job not yet funded on-chain");
-
-    const [bid] = await tx
-      .select()
-      .from(bids)
-      .where(eq(bids.id, params.bidId));
-    if (!bid) throw new Error("Bid not found");
-    if (bid.jobId !== params.jobId) throw new Error("Bid not for this job");
-    if (bid.status !== "pending") throw new Error("Bid not pending");
-
-    const amount = bid.amount;
-    const parsedAmount = parseFloat(amount);
-
-    if (!job.budgetAmount) {
-      throw new Error("Job has no budget set");
-    }
-    const parsedBudget = parseFloat(job.budgetAmount);
-
-    if (parsedAmount > parsedBudget) {
-      throw new Error("Bid amount exceeds job budget");
-    }
-
-    // Find existing escrow (created at verify-funding)
-    const [escrow] = await tx
-      .select()
-      .from(escrows)
-      .where(and(eq(escrows.refId, params.jobId), eq(escrows.refType, "job"), eq(escrows.status, "funded")));
-    if (!escrow) {
-      throw new Error("Job escrow not found — job may not be funded");
-    }
-
-    // Verify worker has a wallet before committing
-    const [recipient] = await tx
-      .select({ walletAddress: agents.walletAddress })
-      .from(agents)
-      .where(eq(agents.id, bid.bidderAgentId));
-    if (!recipient?.walletAddress) {
-      throw new Error("Worker has no wallet address");
-    }
+    if (!j || j.status !== "open") throw new Error("Job no longer open for awarding");
 
     // Accept this bid, reject others
     await tx
@@ -168,10 +166,8 @@ export async function awardJob(params: {
       .set({ status: "rejected" })
       .where(and(eq(bids.jobId, params.jobId), eq(bids.status, "pending")));
 
-    // Create assignment (onChainSynced = false until on-chain call succeeds)
-    const deadlineAt = new Date(
-      Date.now() + (bid.etaSeconds + 86400) * 1000
-    );
+    // Create assignment
+    const deadlineAt = new Date(Date.now() + (bid.etaSeconds + 86400) * 1000);
     const [assignment] = await tx
       .insert(assignments)
       .values({
@@ -193,7 +189,7 @@ export async function awardJob(params: {
       })
       .where(eq(escrows.id, escrow.id));
 
-    // Set expiresAt to match assignment deadline (not just 1 hour)
+    // Set expiresAt to match assignment deadline
     await tx
       .update(jobs)
       .set({
@@ -203,60 +199,20 @@ export async function awardJob(params: {
       })
       .where(eq(jobs.id, params.jobId));
 
-    return {
-      assignment,
-      escrowId: escrow.id,
-      jobTitle: job.title,
-      workerAgentId: bid.bidderAgentId,
-      walletAddress: recipient.walletAddress,
-      amount,
-      parsedAmount,
-      parsedBudget,
-    };
+    return { assignment, escrowId: escrow.id };
   });
-
-  // ── On-chain call AFTER transaction — track sync status ──
-  let onChainSynced = false;
-  if (ESCROW_CONTRACT_ADDRESS && result.walletAddress) {
-    try {
-      if (result.parsedAmount < result.parsedBudget) {
-        await oracleAssignSellerAndAdjust(
-          params.jobId,
-          result.walletAddress,
-          result.amount,
-        );
-      } else {
-        await oracleAssignSeller(params.jobId, result.walletAddress);
-      }
-      onChainSynced = true;
-    } catch (err) {
-      console.error(
-        `[awardJob] On-chain assignSeller failed for job ${params.jobId}:`,
-        err instanceof Error ? err.message : err
-      );
-    }
-  }
-
-  // Update sync status
-  if (onChainSynced) {
-    await db
-      .update(assignments)
-      .set({ onChainSynced: true })
-      .where(eq(assignments.id, result.assignment.id));
-  }
 
   // Post-transaction side effects
   await emitFeedEvent("job_awarded", params.jobId, {
     job_id: params.jobId,
-    title: result.jobTitle,
-    worker_agent_id: result.workerAgentId,
-    amount: result.amount,
+    title: job.title,
+    worker_agent_id: bid.bidderAgentId,
+    amount,
   });
 
   return {
-    assignment: { ...result.assignment, onChainSynced },
+    assignment: result.assignment,
     escrowId: result.escrowId,
-    on_chain_status: onChainSynced ? "synced" : "pending",
   };
 }
 
@@ -404,15 +360,6 @@ export async function acceptWork(params: {
 
     if (submittedAssignments.length === 0)
       throw new Error("No submitted work to accept");
-
-    // Block release if on-chain seller not yet assigned
-    for (const a of submittedAssignments) {
-      if (!a.onChainSynced) {
-        throw new Error(
-          `Assignment ${a.id} is not synced on-chain. The seller has not been assigned on the escrow contract yet. Please retry shortly.`
-        );
-      }
-    }
 
     const workerIds: string[] = [];
     const pendingReleases: { escrowId: string; refId: string; workerAgentId: string; amount: string; onChainTxHash: string }[] = [];

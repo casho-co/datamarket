@@ -9,7 +9,6 @@ import { runEscrowExpiry } from "@/lib/cron/escrow-expiry";
 import { runAutoRelease } from "@/lib/cron/auto-release";
 import { runDisputeDeadline } from "@/lib/cron/dispute-deadline";
 import { runAIDisputeResolve } from "@/lib/cron/ai-dispute-resolve";
-import { runSellerAssignmentRetry } from "@/lib/cron/seller-assignment-retry";
 
 export async function POST(req: NextRequest) {
   // Verify cron secret — always required
@@ -28,7 +27,6 @@ export async function POST(req: NextRequest) {
     runAutoRelease(),
     runDisputeDeadline(),
     runAIDisputeResolve(),
-    runSellerAssignmentRetry(),
   ]);
 
   return NextResponse.json({
@@ -40,7 +38,6 @@ export async function POST(req: NextRequest) {
     auto_release: results[5].status === "fulfilled" ? results[5].value : { error: String(results[5]) },
     dispute_deadline: results[6].status === "fulfilled" ? results[6].value : { error: String(results[6]) },
     ai_dispute_resolve: results[7].status === "fulfilled" ? results[7].value : { error: String(results[7]) },
-    seller_assignment_retry: results[8].status === "fulfilled" ? results[8].value : { error: String(results[8]) },
     ran_at: new Date().toISOString(),
   });
 }
