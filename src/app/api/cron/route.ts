@@ -17,7 +17,7 @@ import { runAIDisputeResolve } from "@/lib/cron/ai-dispute-resolve";
  * This endpoint is for dev/testing convenience.
  */
 export async function POST(req: NextRequest) {
-  const denied = verifyCronAuth(req);
+  const denied = await verifyCronAuth(req);
   if (denied) return denied;
 
   const results: Record<string, unknown> = {};
