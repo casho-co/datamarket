@@ -27,6 +27,7 @@ async function verifySignature(message: string, signature: string) {
     agent_id: string;
     handle: string | null;
     wallet_address: string;
+    erc8004_agent_id?: string | null;
   };
 }
 
