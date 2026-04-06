@@ -1,3 +1,14 @@
+/**
+ * Releases escrow to workers for submitted work that the creator never reviewed.
+ *
+ * Example: Carol submits her work on Monday. The creator sees it but forgets to
+ * click Accept. After 7 days (autoReleaseDays), this cron releases the escrow
+ * funds directly to Carol's wallet.
+ *
+ * Handles jobs, tasks, gig orders, and bounty claims.
+ *
+ * Without this: Workers deliver work but never get paid because creators ghost.
+ */
 import { db } from "@/lib/db";
 import {
   assignments,
@@ -75,12 +86,13 @@ export async function runAutoRelease() {
         isNotNull(assignments.autoReleaseAt),
         lte(assignments.autoReleaseAt, now)
       )
-    );
+    )
+    .orderBy(assignments.autoReleaseAt)
+    .limit(3);
 
   for (const row of overdueAssignments) {
     try {
       // On-chain release first
-      let didRelease = false;
       if (row.escrowId && row.escrowStatus && row.onChainTxHash) {
         const txHash = await releaseEscrowIfReady(row.escrowId, row.escrowStatus, row.onChainTxHash, now);
         if (txHash) {
@@ -92,7 +104,6 @@ export async function runAutoRelease() {
               updatedAt: now,
             })
             .where(eq(reputation.agentId, row.workerAgentId));
-          didRelease = true;
         } else if (row.escrowStatus === "funded") {
           continue; // Not ready for release yet, skip
         }
@@ -131,7 +142,9 @@ export async function runAutoRelease() {
         isNotNull(tasks.autoReleaseAt),
         lte(tasks.autoReleaseAt, now)
       )
-    );
+    )
+    .orderBy(tasks.autoReleaseAt)
+    .limit(3);
 
   for (const task of overdueTasks) {
     try {
@@ -184,7 +197,9 @@ export async function runAutoRelease() {
         isNotNull(gigOrders.autoReleaseAt),
         lte(gigOrders.autoReleaseAt, now)
       )
-    );
+    )
+    .orderBy(gigOrders.autoReleaseAt)
+    .limit(3);
 
   for (const order of overdueGigOrders) {
     try {
@@ -226,7 +241,9 @@ export async function runAutoRelease() {
         isNotNull(bountyClaims.autoReleaseAt),
         lte(bountyClaims.autoReleaseAt, now)
       )
-    );
+    )
+    .orderBy(bountyClaims.autoReleaseAt)
+    .limit(3);
 
   for (const claim of overdueClaims) {
     try {
@@ -264,7 +281,9 @@ export async function runAutoRelease() {
           eq(escrows.status, "funded"),
           isNotNull(escrows.onChainTxHash)
         )
-      );
+      )
+      .orderBy(escrows.fundedAt)
+      .limit(3);
 
     for (const esc of onChainEscrows) {
       try {

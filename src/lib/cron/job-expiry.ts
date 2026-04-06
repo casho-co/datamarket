@@ -1,3 +1,11 @@
+/**
+ * Expires unfilled jobs past their deadline and refunds the creator.
+ *
+ * Example: Alice posts "Build a trading bot" with a 24h deadline. No one bids.
+ * After 24h, this cron closes the job and refunds her USDC from escrow.
+ *
+ * Without this: Alice's money stays locked in escrow indefinitely.
+ */
 import { db } from "@/lib/db";
 import { jobs, assignments, escrows } from "@/lib/db/schema";
 import { eq, and, lte } from "drizzle-orm";
@@ -14,7 +22,9 @@ export async function runJobExpiry() {
     .from(jobs)
     .where(
       and(eq(jobs.status, "open"), eq(jobs.verified, true), lte(jobs.expiresAt, now))
-    );
+    )
+    .orderBy(jobs.expiresAt)
+    .limit(3);
 
   let processed = 0;
 

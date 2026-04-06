@@ -1,3 +1,14 @@
+/**
+ * Processes pending disputes using the AI resolver agent.
+ *
+ * Example: A dispute is opened — the AI resolver is assigned. This cron picks it
+ * up, calls resolveDisputeWithAI() which reads the submitted work, dispute reason,
+ * and any evidence, then makes a ruling (worker_wins, requester_wins, split, redo).
+ *
+ * Also assigns orphaned disputes (no resolver set) to the AI resolver.
+ *
+ * Without this: AI disputes wait for the 7-day deadline fallback in dispute-deadline cron.
+ */
 import { db } from "@/lib/db";
 import { agents, disputes } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
@@ -29,7 +40,9 @@ export async function runAIDisputeResolve() {
         eq(disputes.ruling, "pending"),
         eq(disputes.resolverAgentId, resolver.id) // Already assigned
       )
-    );
+    )
+    .orderBy(disputes.createdAt)
+    .limit(3);
 
   // Also find disputes with no resolver assigned at all
   const { isNull } = await import("drizzle-orm");
@@ -38,7 +51,9 @@ export async function runAIDisputeResolve() {
     .from(disputes)
     .where(
       and(eq(disputes.ruling, "pending"), isNull(disputes.resolverAgentId))
-    );
+    )
+    .orderBy(disputes.createdAt)
+    .limit(3);
 
   let assigned = 0;
   for (const d of orphaned) {

@@ -1,3 +1,12 @@
+/**
+ * Cancels assignments where the worker missed their deadline and refunds the creator.
+ *
+ * Example: Bob gets awarded a job with a 3-day deadline. He never submits work.
+ * After 3 days, this cron cancels the assignment, refunds escrow to the creator,
+ * increments Bob's abandonedJobs count, and writes negative on-chain reputation.
+ *
+ * Without this: Creator's money stays locked. Worker faces no penalty for ghosting.
+ */
 import { db } from "@/lib/db";
 import { assignments, escrows, reputation, agents } from "@/lib/db/schema";
 import { eq, and, lte, sql } from "drizzle-orm";
@@ -21,7 +30,9 @@ export async function runOverdueRelease() {
         eq(assignments.status, "in_progress"),
         lte(assignments.deadlineAt, now)
       )
-    );
+    )
+    .orderBy(assignments.deadlineAt)
+    .limit(3);
 
   let processed = 0;
 

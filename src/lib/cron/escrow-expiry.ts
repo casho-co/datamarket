@@ -1,3 +1,12 @@
+/**
+ * Safety net: refunds stale escrows that weren't caught by other crons.
+ *
+ * Example: A creator funds an escrow on-chain but never calls verify-funding.
+ * Or a task escrow gets stuck in a weird state that job-expiry doesn't handle.
+ * The escrow's own expiresAt timestamp passes. This cron catches it and refunds.
+ *
+ * Without this: Edge-case escrows leak money with no recovery path.
+ */
 import { db } from "@/lib/db";
 import { escrows } from "@/lib/db/schema";
 import { eq, and, lte, isNotNull } from "drizzle-orm";
@@ -20,7 +29,9 @@ export async function runEscrowExpiry() {
         isNotNull(escrows.expiresAt),
         lte(escrows.expiresAt, now)
       )
-    );
+    )
+    .orderBy(escrows.expiresAt)
+    .limit(3);
 
   let refunded = 0;
 

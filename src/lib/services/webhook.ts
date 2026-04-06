@@ -181,7 +181,7 @@ export async function processWebhookRetries(): Promise<number> {
         sql`${webhookDeliveries.attempt} < ${webhookDeliveries.maxAttempts}`
       )
     )
-    .limit(50);
+    .limit(3);
 
   for (const delivery of pendingDeliveries) {
     await attemptDelivery(delivery.id);

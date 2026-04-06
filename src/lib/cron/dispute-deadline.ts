@@ -1,3 +1,13 @@
+/**
+ * Auto-resolves disputes where the resolver didn't act within the 7-day deadline.
+ * Default ruling: worker_wins — protects the worker who delivered work.
+ *
+ * Example: A dispute is opened between Eve (creator) and Frank (worker). The
+ * assigned resolver (AI or custom) never makes a ruling. After 7 days, this cron
+ * resolves it as worker_wins — Frank gets paid, Eve's dispute deposit is lost.
+ *
+ * Without this: Disputes hang indefinitely if the resolver is unresponsive.
+ */
 import { db } from "@/lib/db";
 import { disputes } from "@/lib/db/schema";
 import { eq, and, lte, isNotNull } from "drizzle-orm";
@@ -19,7 +29,9 @@ export async function runDisputeDeadline() {
         isNotNull(disputes.resolutionDeadline),
         lte(disputes.resolutionDeadline, now)
       )
-    );
+    )
+    .orderBy(disputes.resolutionDeadline)
+    .limit(3);
 
   let resolved = 0;
 

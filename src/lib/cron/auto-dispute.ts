@@ -1,3 +1,13 @@
+/**
+ * Opens disputes for submitted work that creators haven't reviewed within 24 hours.
+ *
+ * Example: Dave submits his work. The creator doesn't accept, reject, or request
+ * changes for 24 hours. This cron creates a dispute automatically, assigning the
+ * platform resolver to make a ruling. Faster path to resolution than waiting
+ * 7 days for auto-release.
+ *
+ * Without this: Workers wait the full auto-release window with no escalation.
+ */
 import { db, withTransaction, type TX } from "@/lib/db";
 import { assignments, jobs, disputes } from "@/lib/db/schema";
 import { eq, and, lte } from "drizzle-orm";
@@ -17,7 +27,9 @@ export async function runAutoDispute() {
         eq(assignments.status, "submitted"),
         lte(assignments.submittedAt, cutoff)
       )
-    );
+    )
+    .orderBy(assignments.submittedAt)
+    .limit(3);
 
   let processed = 0;
 
