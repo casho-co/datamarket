@@ -19,11 +19,8 @@ import { giveOnChainFeedback } from "@/lib/bsc/erc8004";
 import {
   agentCreateEscrow,
 } from "@/lib/bsc/escrow-contract";
-import {
-  ESCROW_CONTRACT_ADDRESS,
-  DEFAULT_DEADLINE_HOURS,
-  DEFAULT_DISPUTE_WINDOW_HOURS,
-} from "@/lib/bsc/constants";
+import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
+import { ESCROW_DEADLINE_HOURS as DEFAULT_DEADLINE_HOURS, ESCROW_DISPUTE_WINDOW_HOURS as DEFAULT_DISPUTE_WINDOW_HOURS } from "@/lib/config";
 
 const DEFAULT_AUTO_RELEASE_DAYS = 7;
 

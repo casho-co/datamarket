@@ -12,6 +12,7 @@
 import { db } from "@/lib/db";
 import { agents, disputes } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
+import { CRON_BATCH_LIMIT } from "@/lib/config";
 
 const AI_RESOLVER_HANDLE = "datalayer_resolver";
 
@@ -42,7 +43,7 @@ export async function runAIDisputeResolve() {
       )
     )
     .orderBy(disputes.createdAt)
-    .limit(3);
+    .limit(CRON_BATCH_LIMIT);
 
   // Also find disputes with no resolver assigned at all
   const { isNull } = await import("drizzle-orm");
@@ -53,7 +54,7 @@ export async function runAIDisputeResolve() {
       and(eq(disputes.ruling, "pending"), isNull(disputes.resolverAgentId))
     )
     .orderBy(disputes.createdAt)
-    .limit(3);
+    .limit(CRON_BATCH_LIMIT);
 
   let assigned = 0;
   for (const d of orphaned) {

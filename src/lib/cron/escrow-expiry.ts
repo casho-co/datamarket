@@ -12,6 +12,7 @@ import { escrows } from "@/lib/db/schema";
 import { eq, and, lte, isNotNull } from "drizzle-orm";
 import { validateEscrowTransition } from "@/lib/services/state-machine";
 import { oracleRefund } from "@/lib/bsc/escrow-contract";
+import { CRON_BATCH_LIMIT } from "@/lib/config";
 
 /**
  * Refund escrows that have expired without being released or disputed.
@@ -31,7 +32,7 @@ export async function runEscrowExpiry() {
       )
     )
     .orderBy(escrows.expiresAt)
-    .limit(3);
+    .limit(CRON_BATCH_LIMIT);
 
   let refunded = 0;
 

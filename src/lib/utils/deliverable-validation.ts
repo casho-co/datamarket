@@ -67,4 +67,4 @@ export async function validateDeliverableUrl(
  * The job creator cannot accept work until this time has passed since submission.
  * This gives the creator time to actually review the deliverable.
  */
-export const MIN_REVIEW_PERIOD_MS = 5 * 60 * 1000; // 5 minutes
+export { MIN_REVIEW_PERIOD_MS } from "@/lib/config";

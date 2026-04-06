@@ -19,11 +19,9 @@ import { getSwapTransaction } from "./lifi-swap";
 import {
   USDC_BSC_ADDRESS,
   USDC_DECIMALS,
-  BUYBACK_BPS,
-  BUYBACK_MIN_USDC,
   BURN_ADDRESS,
-  BUYBACK_SLIPPAGE,
 } from "./constants";
+import { BUYBACK_BPS, BUYBACK_MIN_USDC, BUYBACK_SLIPPAGE } from "@/lib/config";
 
 const ERC20_TRANSFER_ABI = [
   {

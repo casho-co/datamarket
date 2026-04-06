@@ -30,8 +30,9 @@ import {
   validateAssignmentTransition,
   validateEscrowTransition,
 } from "./state-machine";
-import { ESCROW_CONTRACT_ADDRESS, DEFAULT_DEADLINE_HOURS, DEFAULT_DISPUTE_WINDOW_HOURS } from "@/lib/bsc/constants";
+import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
 import type { SupportedToken } from "@/lib/bsc/constants";
+import { ESCROW_DEADLINE_HOURS, ESCROW_DISPUTE_WINDOW_HOURS, ASSIGNMENT_DEADLINE_BUFFER_SECONDS } from "@/lib/config";
 import { processPaymentWithBuyback, type BuybackResult } from "@/lib/bsc/buyback";
 
 /**
@@ -167,7 +168,7 @@ export async function awardJob(params: {
       .where(and(eq(bids.jobId, params.jobId), eq(bids.status, "pending")));
 
     // Create assignment
-    const deadlineAt = new Date(Date.now() + (bid.etaSeconds + 86400) * 1000);
+    const deadlineAt = new Date(Date.now() + (bid.etaSeconds + ASSIGNMENT_DEADLINE_BUFFER_SECONDS) * 1000);
     const [assignment] = await tx
       .insert(assignments)
       .values({
@@ -700,8 +701,8 @@ export async function createOnChainEscrow(params: {
       sellerAddress: recipient.walletAddress,
       token: params.token,
       amount: params.amount,
-      deadlineHours: params.deadlineHours || DEFAULT_DEADLINE_HOURS,
-      disputeWindowHours: params.disputeWindowHours || DEFAULT_DISPUTE_WINDOW_HOURS,
+      deadlineHours: params.deadlineHours || ESCROW_DEADLINE_HOURS,
+      disputeWindowHours: params.disputeWindowHours || ESCROW_DISPUTE_WINDOW_HOURS,
     });
 
     return { ...escrow, unsignedTxs: escrowResult.unsignedTxs };

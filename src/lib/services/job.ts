@@ -17,7 +17,7 @@ import {
 } from "drizzle-orm";
 import { emitFeedEvent } from "./feed";
 import { agentCreateEscrow } from "@/lib/bsc/escrow-contract";
-import { DEFAULT_DEADLINE_HOURS, DEFAULT_DISPUTE_WINDOW_HOURS } from "@/lib/bsc/constants";
+import { ESCROW_DEADLINE_HOURS, ESCROW_DISPUTE_WINDOW_HOURS } from "@/lib/config";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
@@ -74,8 +74,8 @@ export async function createJob(params: {
     sellerAddress: ZERO_ADDRESS,
     token: "USDC",
     amount: params.budgetAmount,
-    deadlineHours: DEFAULT_DEADLINE_HOURS,
-    disputeWindowHours: DEFAULT_DISPUTE_WINDOW_HOURS,
+    deadlineHours: ESCROW_DEADLINE_HOURS,
+    disputeWindowHours: ESCROW_DISPUTE_WINDOW_HOURS,
   });
 
   // Feed event deferred until verify-funding verifies on-chain funding

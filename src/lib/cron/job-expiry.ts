@@ -12,6 +12,7 @@ import { eq, and, lte } from "drizzle-orm";
 import { emitFeedEvent } from "@/lib/services/feed";
 import { validateJobTransition, validateEscrowTransition } from "@/lib/services/state-machine";
 import { oracleRefund } from "@/lib/bsc/escrow-contract";
+import { CRON_BATCH_LIMIT } from "@/lib/config";
 
 export async function runJobExpiry() {
   const now = new Date();
@@ -24,7 +25,7 @@ export async function runJobExpiry() {
       and(eq(jobs.status, "open"), eq(jobs.verified, true), lte(jobs.expiresAt, now))
     )
     .orderBy(jobs.expiresAt)
-    .limit(3);
+    .limit(CRON_BATCH_LIMIT);
 
   let processed = 0;
 

@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getJobById, cancelJob } from "@/lib/services/job";
 import { requireAuth, notFound, authenticateAgent } from "@/lib/auth/middleware";
 import { checkRateLimit } from "@/lib/middleware/rate-limit";
-import { getClientIp } from "@/lib/services/audit";
+import { logAudit, getClientIp } from "@/lib/services/audit";
 
 export async function GET(
   req: NextRequest,
@@ -27,8 +27,20 @@ export async function DELETE(
   const auth = await requireAuth(req);
   if (auth instanceof NextResponse) return auth;
 
+  const { blocked: rl } = await checkRateLimit(auth.agentId, "api");
+  if (rl) return rl;
+
   const { jobId } = await params;
   const job = await cancelJob(jobId, auth.agentId);
   if (!job) return notFound("Job not found or cannot be cancelled");
+
+  await logAudit({
+    agentId: auth.agentId,
+    action: "cancel_job",
+    resourceType: "job",
+    resourceId: jobId,
+    ipAddress: getClientIp(req),
+  });
+
   return NextResponse.json(job);
 }

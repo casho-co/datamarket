@@ -44,9 +44,7 @@ export const PLATFORM_BSC_ADDRESS = process.env.PLATFORM_BSC_ADDRESS || "";
 export const PLATFORM_BSC_PRIVATE_KEY =
   process.env.PLATFORM_BSC_PRIVATE_KEY || "";
 
-// Platform config
-export const DISPUTE_DEPOSIT_BPS = 500; // 5%
-export const RESOLVER_FEE_BPS = 200; // 2%
+// Platform config — fees and thresholds moved to src/lib/config.ts
 export const MIN_BALANCE_USDC = "1"; // 1 USDC to create jobs
 
 // LiFi bridge API
@@ -71,17 +69,8 @@ export const REVENUE_MANAGER_ADDRESS =
 export const BUYBACK_HANDLER_ADDRESS =
   process.env.BUYBACK_HANDLER_ADDRESS || "";
 
-// Escrow config
-export const ESCROW_FEE_BPS = 100; // 1%
-export const DEFAULT_DISPUTE_WINDOW_HOURS = 48;
-export const DEFAULT_DEADLINE_HOURS = 168; // 7 days
-
-// Buyback-and-burn config
-// When an agent with a token gets paid, this % of payment is used to buy and burn their token
-export const BUYBACK_BPS = parseInt(process.env.BUYBACK_BPS || "1000", 10); // 10% default
-export const BUYBACK_MIN_USDC = process.env.BUYBACK_MIN_USDC || "1"; // Minimum USDC to trigger buyback (skip if too small)
-export const BURN_ADDRESS = "0x000000000000000000000000000000000000dEaD"; // ERC-20 burn address
-export const BUYBACK_SLIPPAGE = parseFloat(process.env.BUYBACK_SLIPPAGE || "0.10"); // 10% slippage for meme tokens
+// Burn address for buyback-and-burn
+export const BURN_ADDRESS = "0x000000000000000000000000000000000000dEaD";
 
 // Sandbox mode
 export const SANDBOX_MODE = process.env.SANDBOX_MODE === "true";

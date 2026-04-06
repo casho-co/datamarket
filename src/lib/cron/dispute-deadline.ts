@@ -12,6 +12,7 @@ import { db } from "@/lib/db";
 import { disputes } from "@/lib/db/schema";
 import { eq, and, lte, isNotNull } from "drizzle-orm";
 import { resolveDispute } from "@/lib/services/dispute";
+import { CRON_BATCH_LIMIT } from "@/lib/config";
 
 /**
  * Auto-resolve disputes that have passed their voting deadline without resolution.
@@ -31,7 +32,7 @@ export async function runDisputeDeadline() {
       )
     )
     .orderBy(disputes.resolutionDeadline)
-    .limit(3);
+    .limit(CRON_BATCH_LIMIT);
 
   let resolved = 0;
 

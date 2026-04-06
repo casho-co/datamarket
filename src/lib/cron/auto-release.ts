@@ -29,6 +29,7 @@ import {
 } from "@/lib/services/state-machine";
 import { checkAutoReleaseReady, oracleRelease } from "@/lib/bsc/escrow-contract";
 import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
+import { CRON_BATCH_LIMIT } from "@/lib/config";
 
 /**
  * Helper: check on-chain readiness, release, then update DB.
@@ -88,7 +89,7 @@ export async function runAutoRelease() {
       )
     )
     .orderBy(assignments.autoReleaseAt)
-    .limit(3);
+    .limit(CRON_BATCH_LIMIT);
 
   for (const row of overdueAssignments) {
     try {
@@ -144,7 +145,7 @@ export async function runAutoRelease() {
       )
     )
     .orderBy(tasks.autoReleaseAt)
-    .limit(3);
+    .limit(CRON_BATCH_LIMIT);
 
   for (const task of overdueTasks) {
     try {
@@ -199,7 +200,7 @@ export async function runAutoRelease() {
       )
     )
     .orderBy(gigOrders.autoReleaseAt)
-    .limit(3);
+    .limit(CRON_BATCH_LIMIT);
 
   for (const order of overdueGigOrders) {
     try {
@@ -243,7 +244,7 @@ export async function runAutoRelease() {
       )
     )
     .orderBy(bountyClaims.autoReleaseAt)
-    .limit(3);
+    .limit(CRON_BATCH_LIMIT);
 
   for (const claim of overdueClaims) {
     try {
@@ -283,7 +284,7 @@ export async function runAutoRelease() {
         )
       )
       .orderBy(escrows.fundedAt)
-      .limit(3);
+      .limit(CRON_BATCH_LIMIT);
 
     for (const esc of onChainEscrows) {
       try {

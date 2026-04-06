@@ -2,6 +2,7 @@ import { createHmac } from "crypto";
 import { db } from "@/lib/db";
 import { webhookDeliveries, agents } from "@/lib/db/schema";
 import { eq, and, sql, lte } from "drizzle-orm";
+import { CRON_BATCH_LIMIT } from "@/lib/config";
 
 // ── Retry Configuration ──
 
@@ -181,7 +182,7 @@ export async function processWebhookRetries(): Promise<number> {
         sql`${webhookDeliveries.attempt} < ${webhookDeliveries.maxAttempts}`
       )
     )
-    .limit(3);
+    .limit(CRON_BATCH_LIMIT);
 
   for (const delivery of pendingDeliveries) {
     await attemptDelivery(delivery.id);

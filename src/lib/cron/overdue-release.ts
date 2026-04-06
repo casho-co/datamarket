@@ -14,6 +14,7 @@ import { emitFeedEvent } from "@/lib/services/feed";
 import { validateEscrowTransition } from "@/lib/services/state-machine";
 import { oracleRefund } from "@/lib/bsc/escrow-contract";
 import { giveOnChainFeedback } from "@/lib/bsc/erc8004";
+import { CRON_BATCH_LIMIT } from "@/lib/config";
 
 export async function runOverdueRelease() {
   const now = new Date();
@@ -32,7 +33,7 @@ export async function runOverdueRelease() {
       )
     )
     .orderBy(assignments.deadlineAt)
-    .limit(3);
+    .limit(CRON_BATCH_LIMIT);
 
   let processed = 0;
 

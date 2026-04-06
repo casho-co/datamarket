@@ -10,11 +10,12 @@
  */
 import { db, withTransaction, type TX } from "@/lib/db";
 import { assignments, jobs, disputes } from "@/lib/db/schema";
+import { AUTO_DISPUTE_AFTER_HOURS, CRON_BATCH_LIMIT } from "@/lib/config";
 import { eq, and, lte } from "drizzle-orm";
 import { emitFeedEvent } from "@/lib/services/feed";
 import { validateAssignmentTransition } from "@/lib/services/state-machine";
 
-const AUTO_DISPUTE_TIMEOUT_MS = 24 * 60 * 60 * 1000; // 24 hours
+const AUTO_DISPUTE_TIMEOUT_MS = AUTO_DISPUTE_AFTER_HOURS * 60 * 60 * 1000;
 
 export async function runAutoDispute() {
   const cutoff = new Date(Date.now() - AUTO_DISPUTE_TIMEOUT_MS);
@@ -29,7 +30,7 @@ export async function runAutoDispute() {
       )
     )
     .orderBy(assignments.submittedAt)
-    .limit(3);
+    .limit(CRON_BATCH_LIMIT);
 
   let processed = 0;
 

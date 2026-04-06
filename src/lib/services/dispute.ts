@@ -12,7 +12,7 @@ import {
   agents,
 } from "@/lib/db/schema";
 import { eq, and, sql, desc } from "drizzle-orm";
-import { DISPUTE_DEPOSIT_BPS, RESOLVER_FEE_BPS } from "@/lib/bsc/constants";
+import { DISPUTE_DEPOSIT_BPS, RESOLVER_FEE_BPS, DISPUTE_RESOLUTION_DEADLINE_DAYS } from "@/lib/config";
 import { checkSufficientBalance } from "./wallet";
 import { updateReputation } from "./reputation";
 import { emitFeedEvent } from "./feed";
@@ -108,7 +108,7 @@ export async function openDispute(params: {
     }
 
     // Set voting deadline: 7 days from now
-    const resolutionDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const resolutionDeadline = new Date(Date.now() + DISPUTE_RESOLUTION_DEADLINE_DAYS * 24 * 60 * 60 * 1000);
 
     const [dispute] = await tx
       .insert(disputes)
@@ -499,7 +499,7 @@ export async function openTaskDispute(params: {
     validateTaskTransition(task.status, "disputed", task.id);
     await tx.update(tasks).set({ status: "disputed", updatedAt: new Date() }).where(eq(tasks.id, params.taskId));
 
-    const resolutionDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const resolutionDeadline = new Date(Date.now() + DISPUTE_RESOLUTION_DEADLINE_DAYS * 24 * 60 * 60 * 1000);
 
     const [dispute] = await tx.insert(disputes).values({
       taskId: params.taskId,
@@ -558,7 +558,7 @@ export async function openGigOrderDispute(params: {
     validateGigOrderTransition(order.status, "disputed", order.id);
     await tx.update(gigOrders).set({ status: "disputed" }).where(eq(gigOrders.id, params.gigOrderId));
 
-    const resolutionDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+    const resolutionDeadline = new Date(Date.now() + DISPUTE_RESOLUTION_DEADLINE_DAYS * 24 * 60 * 60 * 1000);
 
     const [dispute] = await tx.insert(disputes).values({
       gigOrderId: params.gigOrderId,
@@ -628,7 +628,7 @@ export async function assignPanelResolvers(params: {
   }
 
   // Extend voting deadline for panel: 5 days from now
-  const resolutionDeadline = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
+  const resolutionDeadline = new Date(Date.now() + DISPUTE_RESOLUTION_DEADLINE_DAYS * 24 * 60 * 60 * 1000);
 
   const [updated] = await db
     .update(disputes)

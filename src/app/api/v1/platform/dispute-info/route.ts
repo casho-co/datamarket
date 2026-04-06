@@ -1,13 +1,12 @@
 import { NextResponse } from "next/server";
 import {
-  DISPUTE_DEPOSIT_BPS,
-  RESOLVER_FEE_BPS,
   ERC8004_IDENTITY_REGISTRY,
   ERC8004_REPUTATION_REGISTRY,
   ERC8004_VALIDATION_REGISTRY,
   USDC_BSC_ADDRESS,
   BSC_CHAIN_ID,
 } from "@/lib/bsc/constants";
+import { DISPUTE_DEPOSIT_BPS, RESOLVER_FEE_BPS } from "@/lib/config";
 
 export async function GET() {
   return NextResponse.json({
