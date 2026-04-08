@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/auth/middleware";
 import { checkRateLimit, withRateLimitHeaders } from "@/lib/middleware/rate-limit";
-import { buildMarkDeliveredData, hashDeliverable } from "@/lib/bsc/escrow-contract";
+import { buildSubmitWorkData, hashDeliverable } from "@/lib/bsc/escrow-contract";
 import { db } from "@/lib/db";
 import { escrows } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
@@ -58,7 +58,7 @@ export async function POST(req: NextRequest) {
   try {
     // All agents are non-custodial — return unsigned tx data
     const delivHash = hashDeliverable(deliverable_content);
-    const txData = buildMarkDeliveredData({
+    const txData = buildSubmitWorkData({
       refId: escrow_id,
       deliverableHash: delivHash,
     });
@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
         transaction: {
           to: txData.to,
           data: txData.data,
-          description: "Mark delivery on-chain",
+          description: "Submit work on-chain",
         },
         instructions: "Sign and submit this transaction to mark the deliverable on-chain.",
       })

@@ -83,6 +83,18 @@ contract DatalayerEscrowTest is Test {
         assertEq(e.disputeWindowHours, 48);
     }
 
+    function test_createEscrow_zeroDisputeWindow() public {
+        uint256 amount = 100 ether;
+
+        vm.startPrank(buyer);
+        usdc.approve(address(escrow), amount);
+        escrow.createEscrow(escrowId, seller, address(usdc), amount, 168, 0);
+        vm.stopPrank();
+
+        DatalayerEscrow.Escrow memory e = escrow.getEscrow(escrowId);
+        assertEq(e.disputeWindowHours, 0);
+    }
+
     function test_createEscrow_USDT() public {
         uint256 amount = 50 ether;
 
@@ -127,35 +139,35 @@ contract DatalayerEscrowTest is Test {
         vm.stopPrank();
     }
 
-    // ============ MARK DELIVERED ============
+    // ============ SUBMIT WORK ============
 
-    function test_markDelivered_bySeller() public {
+    function test_submitWork_bySeller() public {
         _createEscrow();
 
         bytes32 hash = keccak256("deliverable content");
 
         vm.prank(seller);
-        escrow.markDelivered(escrowId, hash);
+        escrow.submitWork(escrowId, hash);
 
         DatalayerEscrow.Escrow memory e = escrow.getEscrow(escrowId);
-        assertEq(uint8(e.state), uint8(DatalayerEscrow.EscrowState.DELIVERED));
+        assertEq(uint8(e.state), uint8(DatalayerEscrow.EscrowState.SUBMITTED));
         assertEq(e.deliverableHash, hash);
-        assertGt(e.deliveredAt, 0);
+        assertGt(e.submittedAt, 0);
     }
 
-    function test_markDelivered_byOracle() public {
+    function test_submitWork_byOracle() public {
         _createEscrow();
 
         bytes32 hash = keccak256("deliverable");
 
         vm.prank(oracle);
-        escrow.markDelivered(escrowId, hash);
+        escrow.submitWork(escrowId, hash);
 
         DatalayerEscrow.Escrow memory e = escrow.getEscrow(escrowId);
-        assertEq(uint8(e.state), uint8(DatalayerEscrow.EscrowState.DELIVERED));
+        assertEq(uint8(e.state), uint8(DatalayerEscrow.EscrowState.SUBMITTED));
     }
 
-    function test_markDelivered_revertAfterDeadline() public {
+    function test_submitWork_revertAfterDeadline() public {
         _createEscrow();
 
         // Fast forward past deadline
@@ -163,32 +175,73 @@ contract DatalayerEscrowTest is Test {
 
         vm.prank(seller);
         vm.expectRevert("Deadline passed");
-        escrow.markDelivered(escrowId, keccak256("late"));
+        escrow.submitWork(escrowId, keccak256("late"));
     }
 
-    // ============ RELEASE ============
+    // ============ ACCEPT DELIVERY ============
 
-    function test_release_byBuyer() public {
+    function test_acceptDelivery_immediate() public {
         _createEscrow();
+        _submitWork();
 
         uint256 sellerBefore = usdc.balanceOf(seller);
         uint256 revMgrBefore = usdc.balanceOf(address(revenueManager));
 
-        vm.prank(buyer);
-        escrow.release(escrowId);
+        vm.prank(oracle);
+        escrow.acceptDelivery(escrowId);
 
         DatalayerEscrow.Escrow memory e = escrow.getEscrow(escrowId);
         assertEq(uint8(e.state), uint8(DatalayerEscrow.EscrowState.RELEASED));
 
         // 100 ether - 1% fee = 99 ether to seller
         assertEq(usdc.balanceOf(seller) - sellerBefore, 99 ether);
-        // 1% = 1 ether to revenue manager
         assertEq(usdc.balanceOf(address(revenueManager)) - revMgrBefore, 1 ether);
+    }
+
+    function test_acceptDelivery_revertNotOracle() public {
+        _createEscrow();
+        _submitWork();
+
+        vm.prank(buyer);
+        vm.expectRevert("Only oracle");
+        escrow.acceptDelivery(escrowId);
+    }
+
+    function test_acceptDelivery_revertNotSubmitted() public {
+        _createEscrow();
+
+        vm.prank(oracle);
+        vm.expectRevert("Not submitted");
+        escrow.acceptDelivery(escrowId);
+    }
+
+    // ============ RELEASE ============
+
+    function test_release_byBuyerAfterSubmit() public {
+        _createEscrow();
+        _submitWork();
+
+        uint256 sellerBefore = usdc.balanceOf(seller);
+
+        vm.prank(buyer);
+        escrow.release(escrowId);
+
+        DatalayerEscrow.Escrow memory e = escrow.getEscrow(escrowId);
+        assertEq(uint8(e.state), uint8(DatalayerEscrow.EscrowState.RELEASED));
+        assertEq(usdc.balanceOf(seller) - sellerBefore, 99 ether);
+    }
+
+    function test_release_revertBuyerBeforeSubmit() public {
+        _createEscrow();
+
+        vm.prank(buyer);
+        vm.expectRevert("Not submitted");
+        escrow.release(escrowId);
     }
 
     function test_release_byOracleAfterDisputeWindow() public {
         _createEscrow();
-        _markDelivered();
+        _submitWork();
 
         // Fast forward past dispute window (48 hours)
         vm.warp(block.timestamp + 49 hours);
@@ -202,7 +255,7 @@ contract DatalayerEscrowTest is Test {
 
     function test_release_revertOracleDuringDisputeWindow() public {
         _createEscrow();
-        _markDelivered();
+        _submitWork();
 
         // Still within dispute window
         vm.prank(oracle);
@@ -210,23 +263,41 @@ contract DatalayerEscrowTest is Test {
         escrow.release(escrowId);
     }
 
+    function test_release_oracleImmediate_zeroDisputeWindow() public {
+        // Create escrow with 0 dispute window
+        uint256 amount = 100 ether;
+        vm.startPrank(buyer);
+        usdc.approve(address(escrow), amount);
+        escrow.createEscrow(escrowId, seller, address(usdc), amount, 168, 0);
+        vm.stopPrank();
+
+        vm.prank(oracle);
+        escrow.submitWork(escrowId, keccak256("deliverable"));
+
+        // Oracle can release immediately with 0 dispute window
+        vm.prank(oracle);
+        escrow.release(escrowId);
+
+        DatalayerEscrow.Escrow memory e = escrow.getEscrow(escrowId);
+        assertEq(uint8(e.state), uint8(DatalayerEscrow.EscrowState.RELEASED));
+    }
+
     // ============ DISPUTE ============
 
     function test_dispute() public {
         _createEscrow();
-        _markDelivered();
+        _submitWork();
 
         vm.prank(buyer);
         escrow.dispute(escrowId);
 
         DatalayerEscrow.Escrow memory e = escrow.getEscrow(escrowId);
         assertEq(uint8(e.state), uint8(DatalayerEscrow.EscrowState.DISPUTED));
-        assertTrue(e.disputed);
     }
 
     function test_dispute_revertAfterWindow() public {
         _createEscrow();
-        _markDelivered();
+        _submitWork();
 
         // Fast forward past dispute window
         vm.warp(block.timestamp + 49 hours);
@@ -238,10 +309,26 @@ contract DatalayerEscrowTest is Test {
 
     function test_dispute_revertNotBuyer() public {
         _createEscrow();
-        _markDelivered();
+        _submitWork();
 
         vm.prank(seller);
         vm.expectRevert("Only buyer");
+        escrow.dispute(escrowId);
+    }
+
+    function test_dispute_revertZeroDisputeWindow() public {
+        // Create escrow with 0 dispute window — disputes not allowed
+        uint256 amount = 100 ether;
+        vm.startPrank(buyer);
+        usdc.approve(address(escrow), amount);
+        escrow.createEscrow(escrowId, seller, address(usdc), amount, 168, 0);
+        vm.stopPrank();
+
+        vm.prank(oracle);
+        escrow.submitWork(escrowId, keccak256("deliverable"));
+
+        vm.prank(buyer);
+        vm.expectRevert("Disputes not allowed");
         escrow.dispute(escrowId);
     }
 
@@ -249,7 +336,7 @@ contract DatalayerEscrowTest is Test {
 
     function test_resolveDispute_releaseToSeller() public {
         _createEscrow();
-        _markDelivered();
+        _submitWork();
         _dispute();
 
         uint256 sellerBefore = usdc.balanceOf(seller);
@@ -264,7 +351,7 @@ contract DatalayerEscrowTest is Test {
 
     function test_resolveDispute_refundToBuyer() public {
         _createEscrow();
-        _markDelivered();
+        _submitWork();
         _dispute();
 
         uint256 buyerBefore = usdc.balanceOf(buyer);
@@ -281,7 +368,7 @@ contract DatalayerEscrowTest is Test {
 
     function test_resolveDisputeSplit_5050() public {
         _createEscrow();
-        _markDelivered();
+        _submitWork();
         _dispute();
 
         uint256 sellerBefore = usdc.balanceOf(seller);
@@ -301,7 +388,7 @@ contract DatalayerEscrowTest is Test {
 
     function test_resolveDisputeSplit_fullRefund() public {
         _createEscrow();
-        _markDelivered();
+        _submitWork();
         _dispute();
 
         uint256 buyerBefore = usdc.balanceOf(buyer);
@@ -348,17 +435,110 @@ contract DatalayerEscrowTest is Test {
         escrow.refund(escrowId);
     }
 
+    // ============ ASSIGN SELLER ============
+
+    function test_assignSeller() public {
+        // Create escrow with no seller
+        uint256 amount = 100 ether;
+        vm.startPrank(buyer);
+        usdc.approve(address(escrow), amount);
+        escrow.createEscrow(escrowId, address(0), address(usdc), amount, 168, 48);
+        vm.stopPrank();
+
+        vm.prank(oracle);
+        escrow.assignSeller(escrowId, seller);
+
+        DatalayerEscrow.Escrow memory e = escrow.getEscrow(escrowId);
+        assertEq(e.seller, seller);
+    }
+
+    function test_assignSeller_revertAfterDeadline() public {
+        uint256 amount = 100 ether;
+        vm.startPrank(buyer);
+        usdc.approve(address(escrow), amount);
+        escrow.createEscrow(escrowId, address(0), address(usdc), amount, 168, 48);
+        vm.stopPrank();
+
+        vm.warp(block.timestamp + 169 hours);
+
+        vm.prank(oracle);
+        vm.expectRevert("Deadline passed");
+        escrow.assignSeller(escrowId, seller);
+    }
+
+    // ============ CANCEL UNASSIGNED ============
+
+    function test_cancelUnassigned() public {
+        uint256 amount = 100 ether;
+        vm.startPrank(buyer);
+        usdc.approve(address(escrow), amount);
+        escrow.createEscrow(escrowId, address(0), address(usdc), amount, 168, 48);
+        vm.stopPrank();
+
+        uint256 buyerBefore = usdc.balanceOf(buyer);
+
+        vm.prank(buyer);
+        escrow.cancelUnassigned(escrowId);
+
+        DatalayerEscrow.Escrow memory e = escrow.getEscrow(escrowId);
+        assertEq(uint8(e.state), uint8(DatalayerEscrow.EscrowState.REFUNDED));
+        assertEq(usdc.balanceOf(buyer) - buyerBefore, amount);
+    }
+
+    function test_cancelUnassigned_revertSellerAssigned() public {
+        _createEscrow(); // has seller assigned
+
+        vm.prank(buyer);
+        vm.expectRevert("Seller already assigned");
+        escrow.cancelUnassigned(escrowId);
+    }
+
+    // ============ ASSIGN SELLER AND ADJUST ============
+
+    function test_assignSellerAndAdjust() public {
+        uint256 amount = 100 ether;
+        vm.startPrank(buyer);
+        usdc.approve(address(escrow), amount);
+        escrow.createEscrow(escrowId, address(0), address(usdc), amount, 168, 48);
+        vm.stopPrank();
+
+        uint256 buyerBefore = usdc.balanceOf(buyer);
+
+        vm.prank(oracle);
+        escrow.assignSellerAndAdjust(escrowId, seller, 80 ether);
+
+        DatalayerEscrow.Escrow memory e = escrow.getEscrow(escrowId);
+        assertEq(e.seller, seller);
+        assertEq(e.amount, 80 ether);
+        // Buyer gets 20 ether refund
+        assertEq(usdc.balanceOf(buyer) - buyerBefore, 20 ether);
+    }
+
     // ============ VIEW FUNCTIONS ============
 
     function test_isAutoReleaseReady() public {
         _createEscrow();
-        _markDelivered();
+        _submitWork();
 
         assertFalse(escrow.isAutoReleaseReady(escrowId));
 
         // Fast forward past dispute window
         vm.warp(block.timestamp + 49 hours);
 
+        assertTrue(escrow.isAutoReleaseReady(escrowId));
+    }
+
+    function test_isAutoReleaseReady_zeroWindow() public {
+        uint256 amount = 100 ether;
+        vm.startPrank(buyer);
+        usdc.approve(address(escrow), amount);
+        escrow.createEscrow(escrowId, seller, address(usdc), amount, 168, 0);
+        vm.stopPrank();
+
+        vm.prank(oracle);
+        escrow.submitWork(escrowId, keccak256("deliverable"));
+
+        // Immediately ready with 0 window
         assertTrue(escrow.isAutoReleaseReady(escrowId));
     }
 
@@ -427,9 +607,9 @@ contract DatalayerEscrowTest is Test {
         vm.stopPrank();
     }
 
-    function _markDelivered() internal {
+    function _submitWork() internal {
         vm.prank(seller);
-        escrow.markDelivered(escrowId, keccak256("deliverable"));
+        escrow.submitWork(escrowId, keccak256("deliverable"));
     }
 
     function _dispute() internal {

@@ -13,7 +13,7 @@ import { safeErrorMessage } from "@/lib/utils/safe-error";
 const STATE_LABELS: Record<OnChainEscrowState, string> = {
   [OnChainEscrowState.NONE]: "none",
   [OnChainEscrowState.FUNDED]: "funded",
-  [OnChainEscrowState.DELIVERED]: "delivered",
+  [OnChainEscrowState.SUBMITTED]: "submitted",
   [OnChainEscrowState.DISPUTED]: "disputed",
   [OnChainEscrowState.RELEASED]: "released",
   [OnChainEscrowState.REFUNDED]: "refunded",
@@ -71,10 +71,9 @@ export async function GET(
         amount_wei: onChain.amount.toString(),
         created_at: Number(onChain.createdAt),
         deadline: Number(onChain.deadline),
-        delivered_at: Number(onChain.deliveredAt),
+        submitted_at: Number(onChain.submittedAt),
         dispute_window_hours: Number(onChain.disputeWindowHours),
         deliverable_hash: onChain.deliverableHash,
-        disputed: onChain.disputed,
       };
     } catch {
       response.on_chain_state = null;

@@ -271,7 +271,7 @@ export async function resolveDispute(params: {
   if (params.ruling !== "redo") {
     // Verify on-chain state
     const onChainState = await getOnChainEscrow(escrow.refId);
-    const isDisputedOnChain = onChainState.disputed || onChainState.state === OnChainEscrowState.DISPUTED;
+    const isDisputedOnChain = onChainState.state === OnChainEscrowState.DISPUTED;
 
     if (!isDisputedOnChain) {
       throw new Error(

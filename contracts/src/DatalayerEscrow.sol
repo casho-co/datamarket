@@ -31,7 +31,7 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
     // Whitelisted tokens (USDC, USDT on BSC)
     mapping(address => bool) public allowedTokens;
 
-    enum EscrowState { NONE, FUNDED, DELIVERED, DISPUTED, RELEASED, REFUNDED }
+    enum EscrowState { NONE, FUNDED, SUBMITTED, DISPUTED, RELEASED, REFUNDED }
 
     struct Escrow {
         address buyer;
@@ -40,11 +40,10 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
         uint256 amount;
         uint256 createdAt;
         uint256 deadline;
-        uint256 deliveredAt;
+        uint256 submittedAt;
         uint256 disputeWindowHours;
         bytes32 deliverableHash;
         EscrowState state;
-        bool disputed;
     }
 
     mapping(bytes32 => Escrow) public escrows;
@@ -60,7 +59,8 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
         uint256 deadline,
         uint256 disputeWindowHours
     );
-    event EscrowDelivered(bytes32 indexed refId, uint256 deliveredAt, bytes32 deliverableHash);
+    event WorkSubmitted(bytes32 indexed refId, uint256 submittedAt, bytes32 deliverableHash);
+    event DeliveryAccepted(bytes32 indexed refId, uint256 sellerAmount, uint256 feeAmount);
     event EscrowDisputed(bytes32 indexed refId, address disputedBy);
     event EscrowReleased(bytes32 indexed refId, uint256 sellerAmount, uint256 feeAmount);
     event EscrowRefunded(bytes32 indexed refId, uint256 amount);
@@ -147,7 +147,7 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
         require(amount > 0, "Amount must be > 0");
         require(allowedTokens[token], "Token not allowed");
         require(deadlineHours > 0 && deadlineHours <= 720, "Deadline 1-720 hours");
-        require(disputeWindowHours > 0 && disputeWindowHours <= 168, "Dispute window 1-168 hours");
+        require(disputeWindowHours <= 168, "Dispute window 0-168 hours");
 
         escrows[refId] = Escrow({
             buyer: msg.sender,
@@ -156,11 +156,10 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
             amount: amount,
             createdAt: block.timestamp,
             deadline: block.timestamp + (deadlineHours * 1 hours),
-            deliveredAt: 0,
+            submittedAt: 0,
             disputeWindowHours: disputeWindowHours,
             deliverableHash: bytes32(0),
-            state: EscrowState.FUNDED,
-            disputed: false
+            state: EscrowState.FUNDED
         });
 
         IERC20(token).safeTransferFrom(msg.sender, address(this), amount);
@@ -189,12 +188,13 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
     function assignSeller(
         bytes32 refId,
         address seller
-    ) external whenNotPaused onlyOracle {
+    ) external nonReentrant whenNotPaused onlyOracle {
         Escrow storage escrow = escrows[refId];
         require(escrow.state == EscrowState.FUNDED, "Not funded");
         require(escrow.seller == address(0), "Seller already assigned");
         require(seller != address(0), "Invalid seller");
         require(seller != escrow.buyer, "Seller cannot be buyer");
+        require(block.timestamp <= escrow.deadline, "Deadline passed");
 
         escrow.seller = seller;
 
@@ -216,6 +216,7 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
         require(escrow.seller == address(0), "Seller already assigned");
         require(seller != address(0), "Invalid seller");
         require(seller != escrow.buyer, "Seller cannot be buyer");
+        require(block.timestamp <= escrow.deadline, "Deadline passed");
         require(newAmount > 0, "Amount must be > 0");
         require(newAmount <= escrow.amount, "Amount exceeds escrow");
 
@@ -233,10 +234,10 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
         emit SellerAssigned(refId, seller);
     }
 
-    /// @notice Mark as delivered — seller or oracle can call
+    /// @notice Submit work — seller or oracle marks work as submitted
     /// @param refId The escrow reference identifier
     /// @param deliverableHash Hash of the delivered content for on-chain proof
-    function markDelivered(
+    function submitWork(
         bytes32 refId,
         bytes32 deliverableHash
     ) external whenNotPaused onlySellerOrOracle(refId) {
@@ -245,47 +246,66 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
         require(escrow.seller != address(0), "No seller assigned");
         require(block.timestamp <= escrow.deadline, "Deadline passed");
 
-        escrow.deliveredAt = block.timestamp;
+        escrow.submittedAt = block.timestamp;
         escrow.deliverableHash = deliverableHash;
-        escrow.state = EscrowState.DELIVERED;
+        escrow.state = EscrowState.SUBMITTED;
 
-        emit EscrowDelivered(refId, block.timestamp, deliverableHash);
+        emit WorkSubmitted(refId, block.timestamp, deliverableHash);
     }
 
-    /// @notice Dispute — buyer can call within dispute window after delivery
+    /// @notice Dispute — buyer can call within dispute window after work submission
+    /// @dev disputeWindowHours == 0 means no dispute allowed (instant release escrow)
     /// @param refId The escrow reference identifier
-    function dispute(bytes32 refId) external whenNotPaused {
+    function dispute(bytes32 refId) external nonReentrant whenNotPaused {
         Escrow storage escrow = escrows[refId];
-        require(escrow.state == EscrowState.DELIVERED, "Not delivered");
+        require(escrow.state == EscrowState.SUBMITTED, "Not submitted");
         require(msg.sender == escrow.buyer, "Only buyer");
-        require(!escrow.disputed, "Already disputed");
+        require(escrow.disputeWindowHours > 0, "Disputes not allowed");
         require(
-            block.timestamp <= escrow.deliveredAt + (escrow.disputeWindowHours * 1 hours),
+            block.timestamp <= escrow.submittedAt + (escrow.disputeWindowHours * 1 hours),
             "Dispute window closed"
         );
 
-        escrow.disputed = true;
         escrow.state = EscrowState.DISPUTED;
 
         emit EscrowDisputed(refId, msg.sender);
     }
 
-    /// @notice Release — buyer or oracle (after dispute window)
-    /// @dev Deducts platform fee and sends to RevenueManager
+    /// @notice Accept delivery — oracle releases immediately when buyer explicitly accepts
+    /// @dev Bypasses dispute window. Only callable by oracle (buyer acceptance is verified off-chain).
+    /// @param refId The escrow reference identifier
+    function acceptDelivery(bytes32 refId) external nonReentrant whenNotPaused onlyOracle {
+        Escrow storage escrow = escrows[refId];
+        require(escrow.state == EscrowState.SUBMITTED, "Not submitted");
+        require(escrow.seller != address(0), "No seller assigned");
+
+        escrow.state = EscrowState.RELEASED;
+
+        uint256 fee = (escrow.amount * feeBasisPoints) / BASIS_POINTS;
+        uint256 sellerAmount = escrow.amount - fee;
+
+        IERC20(escrow.token).safeTransfer(escrow.seller, sellerAmount);
+        if (fee > 0) {
+            IERC20(escrow.token).safeTransfer(revenueManager, fee);
+        }
+
+        emit DeliveryAccepted(refId, sellerAmount, fee);
+    }
+
+    /// @notice Release — buyer can release after work is submitted, oracle after dispute window (cron)
+    /// @dev Buyer release bypasses dispute window (explicit acceptance from their wallet).
+    ///      Oracle release enforces dispute window (auto-release via cron).
     /// @param refId The escrow reference identifier
     function release(bytes32 refId) external nonReentrant whenNotPaused onlyBuyerOrOracle(refId) {
         Escrow storage escrow = escrows[refId];
-        require(
-            escrow.state == EscrowState.FUNDED || escrow.state == EscrowState.DELIVERED,
-            "Cannot release"
-        );
-        require(!escrow.disputed, "Disputed");
+        require(escrow.state == EscrowState.SUBMITTED, "Not submitted");
         require(escrow.seller != address(0), "No seller assigned");
 
-        // Oracle can only release after dispute window
-        if (escrow.state == EscrowState.DELIVERED && msg.sender == oracle) {
+        // Oracle can only auto-release after dispute window
+        if (msg.sender == oracle) {
             require(
-                block.timestamp > escrow.deliveredAt + (escrow.disputeWindowHours * 1 hours),
+                escrow.disputeWindowHours == 0 ||
+                block.timestamp > escrow.submittedAt + (escrow.disputeWindowHours * 1 hours),
                 "Dispute window active"
             );
         }
@@ -309,7 +329,7 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
         Escrow storage escrow = escrows[refId];
         require(
             escrow.state == EscrowState.FUNDED ||
-            escrow.state == EscrowState.DELIVERED ||
+            escrow.state == EscrowState.SUBMITTED ||
             escrow.state == EscrowState.DISPUTED,
             "Cannot refund"
         );
@@ -318,7 +338,7 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
         if (msg.sender == escrow.buyer) {
             if (escrow.state == EscrowState.FUNDED) {
                 require(block.timestamp > escrow.deadline, "Deadline not passed");
-            } else if (escrow.state == EscrowState.DELIVERED) {
+            } else if (escrow.state == EscrowState.SUBMITTED) {
                 revert("Must dispute first");
             }
             if (escrow.state == EscrowState.DISPUTED) {
@@ -402,9 +422,9 @@ contract DatalayerEscrow is ReentrancyGuard, Pausable, Ownable {
     /// @notice Check if auto-release is ready (used by oracle cron)
     function isAutoReleaseReady(bytes32 refId) external view returns (bool) {
         Escrow storage escrow = escrows[refId];
-        if (escrow.state != EscrowState.DELIVERED) return false;
-        if (escrow.disputed) return false;
-        return block.timestamp > escrow.deliveredAt + (escrow.disputeWindowHours * 1 hours);
+        if (escrow.state != EscrowState.SUBMITTED) return false;
+        if (escrow.disputeWindowHours == 0) return true;
+        return block.timestamp > escrow.submittedAt + (escrow.disputeWindowHours * 1 hours);
     }
 
     /// @notice Check if refund is ready (deadline passed, not delivered)

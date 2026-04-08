@@ -5,7 +5,7 @@ import { logAudit, getClientIp } from "@/lib/services/audit";
 import { db } from "@/lib/db";
 import { disputes, escrows, assignments } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
-import { getOnChainEscrow } from "@/lib/bsc/escrow-contract";
+import { getOnChainEscrow, OnChainEscrowState } from "@/lib/bsc/escrow-contract";
 import { getPublicClient } from "@/lib/bsc/client";
 import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
 import { type Hex } from "viem";
@@ -86,7 +86,7 @@ export async function POST(
 
     // 5. Verify on-chain escrow is now in disputed state
     const onChainEscrow = await getOnChainEscrow(escrow.refId);
-    if (!onChainEscrow.disputed && onChainEscrow.state !== 3) {
+    if (onChainEscrow.state !== OnChainEscrowState.DISPUTED) {
       return NextResponse.json(
         { error: "On-chain escrow not in disputed state. Transaction may not have called dispute()." },
         { status: 400 }

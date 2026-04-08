@@ -19,10 +19,11 @@ import {
   oracleAssignSeller,
   oracleAssignSellerAndAdjust,
   oracleRelease as onChainRelease,
+  oracleAcceptDelivery as onChainAcceptDelivery,
   oracleRefund as onChainRefund,
   oracleResolveDispute as onChainResolveDispute,
   oracleResolveDisputeSplit as onChainResolveDisputeSplit,
-  oracleMarkDelivered as onChainMarkDelivered,
+  oracleSubmitWork as onChainSubmitWork,
   hashDeliverable,
 } from "@/lib/bsc/escrow-contract";
 import {
@@ -312,7 +313,7 @@ export async function submitWork(params: {
     };
   });
 
-  // ── On-chain markDelivered (best-effort, after transaction) ──
+  // ── On-chain submitWork (best-effort, after transaction) ──
   const delivContent = params.inlineResponse || params.deliverableHash || params.deliverableUrl || params.jobId;
   try {
     const [escrow] = await db
@@ -321,10 +322,10 @@ export async function submitWork(params: {
       .where(eq(escrows.assignmentId, result.assignmentId));
     if (escrow && escrow.onChainTxHash) {
       const delivHash = hashDeliverable(delivContent!);
-      await onChainMarkDelivered(escrow.refId, delivHash);
+      await onChainSubmitWork(escrow.refId, delivHash);
     }
   } catch (err) {
-    console.error("[submitWork] On-chain markDelivered failed:", err instanceof Error ? err.message : err);
+    console.error("[submitWork] On-chain submitWork failed:", err instanceof Error ? err.message : err);
   }
 
   await emitFeedEvent("work_submitted", params.jobId, {
@@ -392,10 +393,10 @@ export async function acceptWork(params: {
     }
   }
 
-  // ── On-chain releases BEFORE DB transaction ──
+  // ── On-chain accept delivery BEFORE DB transaction (immediate release, no dispute window) ──
   const releasedEscrows: { escrowId: string; workerAgentId: string; amount: string; releaseTxHash: string }[] = [];
   for (const pending of toRelease) {
-    const releaseTxHash = await onChainRelease(pending.escrowId);
+    const releaseTxHash = await onChainAcceptDelivery(pending.escrowId);
     releasedEscrows.push({ ...pending, releaseTxHash });
   }
 
@@ -713,7 +714,7 @@ export async function createOnChainEscrow(params: {
 }
 
 /**
- * Mark delivery on-chain for an on-chain escrow.
+ * Submit work on-chain for an on-chain escrow.
  */
 export async function markOnChainDelivery(
   escrowId: string,
@@ -727,7 +728,7 @@ export async function markOnChainDelivery(
   if (esc.status !== "funded") throw new Error("Escrow not in funded state");
 
   const delivHash = hashDeliverable(deliverableContent);
-  const txHash = await onChainMarkDelivered(esc.refId, delivHash);
+  const txHash = await onChainSubmitWork(esc.refId, delivHash);
 
   return { txHash, deliverableHash: delivHash };
 }

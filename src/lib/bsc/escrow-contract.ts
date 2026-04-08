@@ -56,13 +56,20 @@ const ESCROW_ABI = [
     outputs: [],
   },
   {
-    name: "markDelivered",
+    name: "submitWork",
     type: "function",
     stateMutability: "nonpayable",
     inputs: [
       { name: "refId", type: "bytes32" },
       { name: "deliverableHash", type: "bytes32" },
     ],
+    outputs: [],
+  },
+  {
+    name: "acceptDelivery",
+    type: "function",
+    stateMutability: "nonpayable",
+    inputs: [{ name: "refId", type: "bytes32" }],
     outputs: [],
   },
   {
@@ -136,11 +143,10 @@ const ESCROW_ABI = [
           { name: "amount", type: "uint256" },
           { name: "createdAt", type: "uint256" },
           { name: "deadline", type: "uint256" },
-          { name: "deliveredAt", type: "uint256" },
+          { name: "submittedAt", type: "uint256" },
           { name: "disputeWindowHours", type: "uint256" },
           { name: "deliverableHash", type: "bytes32" },
           { name: "state", type: "uint8" },
-          { name: "disputed", type: "bool" },
         ],
       },
     ],
@@ -172,7 +178,7 @@ const ERC20_APPROVE_ABI = [
 export enum OnChainEscrowState {
   NONE = 0,
   FUNDED = 1,
-  DELIVERED = 2,
+  SUBMITTED = 2,
   DISPUTED = 3,
   RELEASED = 4,
   REFUNDED = 5,
@@ -185,11 +191,10 @@ export interface OnChainEscrow {
   amount: bigint;
   createdAt: bigint;
   deadline: bigint;
-  deliveredAt: bigint;
+  submittedAt: bigint;
   disputeWindowHours: bigint;
   deliverableHash: string;
   state: OnChainEscrowState;
-  disputed: boolean;
 }
 
 // ============ UTILITIES ============
@@ -277,9 +282,9 @@ export function buildCreateEscrowData(params: {
 }
 
 /**
- * Build unsigned markDelivered transaction data.
+ * Build unsigned submitWork transaction data.
  */
-export function buildMarkDeliveredData(params: {
+export function buildSubmitWorkData(params: {
   refId: string;
   deliverableHash: string;
 }): { to: string; data: Hex } {
@@ -287,7 +292,7 @@ export function buildMarkDeliveredData(params: {
     to: getContractAddress(),
     data: encodeFunctionData({
       abi: ESCROW_ABI,
-      functionName: "markDelivered",
+      functionName: "submitWork",
       args: [uuidToBytes32(params.refId), params.deliverableHash as Hex],
     }),
   };
@@ -408,9 +413,9 @@ export async function oracleAssignSellerAndAdjust(
 }
 
 /**
- * Oracle marks delivery on-chain.
+ * Oracle submits work on-chain (marks deliverable as submitted).
  */
-export async function oracleMarkDelivered(
+export async function oracleSubmitWork(
   escrowId: string,
   deliverableHash: string
 ): Promise<string> {
@@ -421,7 +426,7 @@ export async function oracleMarkDelivered(
   const hash = await walletClient.writeContract({
     address: getContractAddress(),
     abi: ESCROW_ABI,
-    functionName: "markDelivered",
+    functionName: "submitWork",
     args: [uuidToBytes32(escrowId), deliverableHash as Hex],
     account,
     chain: bsc,
@@ -432,7 +437,28 @@ export async function oracleMarkDelivered(
 }
 
 /**
- * Oracle releases escrow (after dispute window).
+ * Oracle accepts delivery on behalf of buyer — immediate release, no dispute window.
+ */
+export async function oracleAcceptDelivery(escrowId: string): Promise<string> {
+  const walletClient = getWalletClient();
+  const account = getPlatformAccount();
+  const publicClient = getPublicClient();
+
+  const hash = await walletClient.writeContract({
+    address: getContractAddress(),
+    abi: ESCROW_ABI,
+    functionName: "acceptDelivery",
+    args: [uuidToBytes32(escrowId)],
+    account,
+    chain: bsc,
+  });
+
+  await publicClient.waitForTransactionReceipt({ hash });
+  return hash;
+}
+
+/**
+ * Oracle auto-releases escrow (after dispute window — used by cron).
  */
 export async function oracleRelease(escrowId: string): Promise<string> {
   const walletClient = getWalletClient();
@@ -564,11 +590,10 @@ export async function getOnChainEscrow(entityId: string): Promise<OnChainEscrow>
     amount: bigint;
     createdAt: bigint;
     deadline: bigint;
-    deliveredAt: bigint;
+    submittedAt: bigint;
     disputeWindowHours: bigint;
     deliverableHash: string;
     state: number;
-    disputed: boolean;
   };
 
   return {
@@ -578,11 +603,10 @@ export async function getOnChainEscrow(entityId: string): Promise<OnChainEscrow>
     amount: data.amount,
     createdAt: data.createdAt,
     deadline: data.deadline,
-    deliveredAt: data.deliveredAt,
+    submittedAt: data.submittedAt,
     disputeWindowHours: data.disputeWindowHours,
     deliverableHash: data.deliverableHash,
     state: data.state as OnChainEscrowState,
-    disputed: data.disputed,
   };
 }
 
