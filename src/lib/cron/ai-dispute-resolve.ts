@@ -17,6 +17,59 @@ import { CRON_BATCH_LIMIT } from "@/lib/config";
 const AI_RESOLVER_HANDLE = process.env.PLATFORM_RESOLVER_HANDLE || "platform_resolver";
 
 /**
+ * Ensure the resolver agent has an on-chain ERC-8004 identity.
+ * Mints one if missing — runs once, then no-ops on subsequent cron cycles.
+ */
+async function ensureResolverIdentity(resolver: { id: string; erc8004AgentId: bigint | null; walletAddress: string }) {
+  if (resolver.erc8004AgentId) return;
+
+  try {
+    const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://market.datalayer.xyz";
+    const agentURI = `${baseUrl}/api/v1/agents/${resolver.id}`;
+
+    const { getWalletClient, getPlatformAccount, getPublicClient } = await import("@/lib/bsc/client");
+    const { ERC8004_IDENTITY_REGISTRY } = await import("@/lib/bsc/constants");
+
+    const { bsc } = await import("viem/chains");
+
+    const walletClient = getWalletClient();
+    const account = getPlatformAccount();
+    const publicClient = getPublicClient();
+
+    const hash = await walletClient.writeContract({
+      address: ERC8004_IDENTITY_REGISTRY as `0x${string}`,
+      abi: [{
+        name: "register",
+        type: "function",
+        stateMutability: "nonpayable",
+        inputs: [{ name: "agentURI", type: "string" }],
+        outputs: [{ name: "agentId", type: "uint256" }],
+      }] as const,
+      functionName: "register",
+      args: [agentURI],
+      account,
+      chain: bsc,
+    });
+
+    const receipt = await publicClient.waitForTransactionReceipt({ hash });
+
+    // Extract tokenId from Transfer event (mint: from=0x0)
+    const { parseTokenIdFromReceipt } = await import("@/lib/bsc/erc8004");
+    const tokenId = parseTokenIdFromReceipt(receipt);
+
+    if (tokenId) {
+      await db
+        .update(agents)
+        .set({ erc8004AgentId: tokenId })
+        .where(eq(agents.id, resolver.id));
+      console.log(`[AI-Resolve-Cron] Minted ERC-8004 identity for resolver: tokenId=${tokenId}`);
+    }
+  } catch (err) {
+    console.error("[AI-Resolve-Cron] Failed to mint resolver identity:", err instanceof Error ? err.message : err);
+  }
+}
+
+/**
  * Cron job: find the AI resolver agent and resolve all disputes assigned to it.
  * Also picks up any unassigned disputes and assigns them to the AI resolver.
  */
@@ -31,6 +84,9 @@ export async function runAIDisputeResolve() {
     console.log(`[AI-Resolve-Cron] Resolver agent "${AI_RESOLVER_HANDLE}" not found, skipping`);
     return { resolved: 0, assigned: 0, error: "Resolver agent not registered" };
   }
+
+  // Ensure resolver has on-chain identity (mints once, no-ops after)
+  await ensureResolverIdentity(resolver);
 
   // Assign unassigned pending disputes to the AI resolver
   const unassigned = await db
