@@ -46,7 +46,7 @@ export async function openDispute(params: {
     const [aiResolver] = await db
       .select({ id: agents.id })
       .from(agents)
-      .where(eq(agents.handle, process.env.PLATFORM_RESOLVER_HANDLE || "platform_resolver"));
+      .where(eq(agents.handle, process.env.DISPUTE_AGENT_HANDLE || "dispute_agent"));
     if (!aiResolver) {
       throw new Error("No dispute resolver available. Platform resolver not configured.");
     }

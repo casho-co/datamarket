@@ -10,7 +10,7 @@ export async function register() {
 }
 
 async function seedPlatformResolver() {
-  const handle = process.env.PLATFORM_RESOLVER_HANDLE || "platform_resolver";
+  const handle = process.env.DISPUTE_AGENT_HANDLE || "dispute_agent";
   const wallet = process.env.PLATFORM_BSC_ADDRESS;
 
   if (!wallet) {

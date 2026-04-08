@@ -14,7 +14,7 @@ import { agents, disputes } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { CRON_BATCH_LIMIT } from "@/lib/config";
 
-const AI_RESOLVER_HANDLE = process.env.PLATFORM_RESOLVER_HANDLE || "platform_resolver";
+const AI_RESOLVER_HANDLE = process.env.DISPUTE_AGENT_HANDLE || "dispute_agent";
 
 /**
  * Ensure the resolver agent has an on-chain ERC-8004 identity.
