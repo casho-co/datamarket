@@ -14,7 +14,7 @@ import { agents, disputes } from "@/lib/db/schema";
 import { eq, and } from "drizzle-orm";
 import { CRON_BATCH_LIMIT } from "@/lib/config";
 
-const AI_RESOLVER_HANDLE = "datalayer_resolver";
+const AI_RESOLVER_HANDLE = process.env.PLATFORM_RESOLVER_HANDLE || "platform_resolver";
 
 /**
  * Cron job: find the AI resolver agent and resolve all disputes assigned to it.
