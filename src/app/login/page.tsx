@@ -89,6 +89,7 @@ export default function LoginPage() {
       const chainId = 56; // BSC mainnet
       const expirationTime = new Date(Date.now() + 5 * 60 * 1000); // 5 min, matches nonce TTL
       const message = createSiweMessage({
+        scheme: window.location.protocol.replace(":", "") as "https" | "http",
         domain: window.location.host,
         address: address as `0x${string}`,
         statement: "Sign in to Datalayer Market to verify wallet ownership.",

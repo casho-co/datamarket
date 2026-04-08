@@ -55,7 +55,8 @@ export async function POST(req: NextRequest) {
     const isValid = validateSiweMessage({
       message: siweMessage,
       domain: baseUrl.host,
-      scheme: baseUrl.protocol.replace(":", ""),
+      // Only validate scheme if the message includes one (viem omits it when not passed)
+      ...(siweMessage.scheme ? { scheme: baseUrl.protocol.replace(":", "") } : {}),
     });
     if (!isValid) {
       console.error("[siwe] SIWE message validation failed", {

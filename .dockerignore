@@ -1,0 +1,10 @@
+node_modules
+.next
+.git
+rainbowkit
+bscai
+contracts
+erc-8004-contracts
+scripts
+*.md
+.env.local
