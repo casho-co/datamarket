@@ -17,7 +17,7 @@ import {
 } from "drizzle-orm";
 import { emitFeedEvent } from "./feed";
 import { agentCreateEscrow } from "@/lib/bsc/escrow-contract";
-import { ESCROW_DEADLINE_HOURS, ESCROW_DISPUTE_WINDOW_HOURS } from "@/lib/config";
+import { ESCROW_DEADLINE_HOURS, ESCROW_DISPUTE_WINDOW_HOURS, ESCROW_REF } from "@/lib/config";
 
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 
@@ -239,7 +239,7 @@ export async function cancelJob(jobId: string, agentId: string) {
     const [escrow] = await db
       .select()
       .from(escrows)
-      .where(and(eq(escrows.refId, jobId), eq(escrows.refType, "job"), eq(escrows.status, "funded")));
+      .where(and(eq(escrows.refId, jobId), eq(escrows.refType, ESCROW_REF.JOB), eq(escrows.status, "funded")));
 
     if (escrow && escrow.onChainTxHash) {
       const { oracleRefund } = await import("@/lib/bsc/escrow-contract");

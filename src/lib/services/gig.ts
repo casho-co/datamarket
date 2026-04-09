@@ -21,7 +21,7 @@ import {
   oracleRefund as onChainRefund,
 } from "@/lib/bsc/escrow-contract";
 import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
-import { ESCROW_DEADLINE_HOURS as DEFAULT_DEADLINE_HOURS, ESCROW_DISPUTE_WINDOW_HOURS as DEFAULT_DISPUTE_WINDOW_HOURS } from "@/lib/config";
+import { ESCROW_DEADLINE_HOURS as DEFAULT_DEADLINE_HOURS, ESCROW_DISPUTE_WINDOW_HOURS as DEFAULT_DISPUTE_WINDOW_HOURS, ESCROW_REF } from "@/lib/config";
 import { processPaymentWithBuyback, type BuybackResult } from "@/lib/bsc/buyback";
 
 const DEFAULT_AUTO_RELEASE_DAYS = 7;
@@ -180,19 +180,7 @@ export async function orderGig(params: {
     const hasFunds = await checkSufficientBalance(params.buyerAgentId, gig.price);
     if (!hasFunds) throw new Error("Insufficient on-chain USDC balance");
 
-    // Create escrow (on-chain) — refId will be updated to order.id below
-    const [escrow] = await tx
-      .insert(escrows)
-      .values({
-        refId: params.gigId, // temporary, updated to order.id below
-        refType: "gig_order",
-        funderAgentId: params.buyerAgentId,
-        recipientAgentId: gig.sellerAgentId,
-        amount: gig.price,
-      })
-      .returning();
-
-    // Create order
+    // Create order first
     const deliverBy = new Date(
       Date.now() + gig.deliveryDays * 24 * 60 * 60 * 1000
     );
@@ -202,17 +190,22 @@ export async function orderGig(params: {
         gigId: params.gigId,
         buyerAgentId: params.buyerAgentId,
         sellerAgentId: gig.sellerAgentId,
-        escrowId: escrow.id,
         requirements: params.requirements || null,
         deliverBy,
       })
       .returning();
 
-    // Link escrow to order (update refId from temp gigId to actual orderId)
-    await tx
-      .update(escrows)
-      .set({ refId: order.id })
-      .where(eq(escrows.id, escrow.id));
+    // Create escrow with refId = order.id (no chicken-and-egg)
+    const [escrow] = await tx
+      .insert(escrows)
+      .values({
+        refId: order.id,
+        refType: "gig_order",
+        funderAgentId: params.buyerAgentId,
+        recipientAgentId: gig.sellerAgentId,
+        amount: gig.price,
+      })
+      .returning();
 
     // Increment gig total orders
     await tx
@@ -226,7 +219,7 @@ export async function orderGig(params: {
     return { order, escrow, sellerAgentId: gig.sellerAgentId, price: gig.price };
   });
 
-  // Create on-chain escrow from buyer's own wallet
+  // Build on-chain escrow tx for buyer to sign
   if (ESCROW_CONTRACT_ADDRESS && result.escrow) {
     const [funder] = await db
       .select({ walletAddress: agents.walletAddress })
@@ -241,7 +234,7 @@ export async function orderGig(params: {
       try {
         const escrowResult = agentCreateEscrow({
           walletAddress: funder.walletAddress,
-          refId: result.escrow.id,
+          refId: result.order.id,
           sellerAddress: recipient.walletAddress,
           token: "USDC",
           amount: result.price,
@@ -353,11 +346,11 @@ export async function acceptGigDelivery(params: {
 
     // Release escrow on-chain
     let releasedEscrow: { id: string; amount: string } | null = null;
-    if (order.escrowId) {
+    {
       const [escrow] = await tx
         .select()
         .from(escrows)
-        .where(eq(escrows.id, order.escrowId));
+        .where(and(eq(escrows.refId, params.orderId), eq(escrows.refType, ESCROW_REF.GIG_ORDER)));
 
       if (escrow && escrow.status === "funded") {
         if (!escrow.onChainTxHash) {
@@ -492,11 +485,11 @@ export async function cancelGigOrder(params: {
     validateGigOrderTransition(order.status, "cancelled", order.id);
 
     // Refund escrow on-chain
-    if (order.escrowId) {
+    {
       const [escrow] = await tx
         .select()
         .from(escrows)
-        .where(eq(escrows.id, order.escrowId));
+        .where(and(eq(escrows.refId, params.orderId), eq(escrows.refType, ESCROW_REF.GIG_ORDER)));
 
       if (escrow && escrow.status === "funded") {
         if (!escrow.onChainTxHash) {

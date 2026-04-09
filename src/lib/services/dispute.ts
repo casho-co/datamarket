@@ -12,7 +12,7 @@ import {
   agents,
 } from "@/lib/db/schema";
 import { eq, and, sql, desc } from "drizzle-orm";
-import { DISPUTE_DEPOSIT_BPS, RESOLVER_FEE_BPS, DISPUTE_RESOLUTION_DEADLINE_DAYS } from "@/lib/config";
+import { DISPUTE_DEPOSIT_BPS, RESOLVER_FEE_BPS, DISPUTE_RESOLUTION_DEADLINE_DAYS, DISPUTE_ENTITY, ESCROW_REF } from "@/lib/config";
 import { checkSufficientBalance } from "./wallet";
 import { updateReputation } from "./reputation";
 import { emitFeedEvent } from "./feed";
@@ -98,13 +98,13 @@ export async function openDispute(params: {
     const [escrow] = await tx
       .select()
       .from(escrows)
-      .where(eq(escrows.assignmentId, assignment.id));
+      .where(and(eq(escrows.refId, assignment.jobId), eq(escrows.refType, ESCROW_REF.JOB)));
     if (escrow) {
       validateEscrowTransition(escrow.status, "disputed", escrow.id);
       await tx
         .update(escrows)
         .set({ status: "disputed" })
-        .where(eq(escrows.assignmentId, assignment.id));
+        .where(and(eq(escrows.refId, assignment.jobId), eq(escrows.refType, ESCROW_REF.JOB)));
     }
 
     // Set voting deadline: 7 days from now
@@ -113,7 +113,8 @@ export async function openDispute(params: {
     const [dispute] = await tx
       .insert(disputes)
       .values({
-        assignmentId: assignment.id,
+        entityId: assignment.id,
+        entityType: DISPUTE_ENTITY.ASSIGNMENT,
         openerAgentId: params.openerAgentId,
         resolverAgentId,
         reason: params.reason,
@@ -170,11 +171,11 @@ export async function addEvidence(params: {
   if (dispute.openerAgentId === params.submitterAgentId) authorized = true;
   if (dispute.resolverAgentId === params.submitterAgentId) authorized = true;
 
-  if (!authorized && dispute.assignmentId) {
+  if (!authorized && dispute.entityType === DISPUTE_ENTITY.ASSIGNMENT) {
     const [assignment] = await db
       .select()
       .from(assignments)
-      .where(eq(assignments.id, dispute.assignmentId));
+      .where(eq(assignments.id, dispute.entityId));
     if (assignment) {
       const [job] = await db
         .select()
@@ -189,8 +190,8 @@ export async function addEvidence(params: {
     }
   }
 
-  if (!authorized && dispute.taskId) {
-    const [task] = await db.select().from(tasks).where(eq(tasks.id, dispute.taskId));
+  if (!authorized && dispute.entityType === DISPUTE_ENTITY.TASK) {
+    const [task] = await db.select().from(tasks).where(eq(tasks.id, dispute.entityId));
     if (
       task?.creatorAgentId === params.submitterAgentId ||
       task?.workerAgentId === params.submitterAgentId
@@ -199,11 +200,11 @@ export async function addEvidence(params: {
     }
   }
 
-  if (!authorized && dispute.gigOrderId) {
+  if (!authorized && dispute.entityType === DISPUTE_ENTITY.GIG_ORDER) {
     const [order] = await db
       .select()
       .from(gigOrders)
-      .where(eq(gigOrders.id, dispute.gigOrderId));
+      .where(eq(gigOrders.id, dispute.entityId));
     if (
       order?.buyerAgentId === params.submitterAgentId ||
       order?.sellerAgentId === params.submitterAgentId
@@ -246,18 +247,18 @@ export async function resolveDispute(params: {
   if (dispute.resolverAgentId && dispute.resolverAgentId !== params.resolverAgentId) {
     throw new Error("Not authorized to resolve");
   }
-  if (!dispute.assignmentId) throw new Error("Assignment not found");
+  if (dispute.entityType !== "assignment") throw new Error("Only job disputes can be resolved here");
 
   const [assignment] = await db
     .select()
     .from(assignments)
-    .where(eq(assignments.id, dispute.assignmentId));
+    .where(eq(assignments.id, dispute.entityId));
   if (!assignment) throw new Error("Assignment not found");
 
   const [escrow] = await db
     .select()
     .from(escrows)
-    .where(eq(escrows.assignmentId, assignment.id));
+    .where(and(eq(escrows.refId, assignment.jobId), eq(escrows.refType, ESCROW_REF.JOB)));
   if (!escrow) throw new Error("Escrow not found");
   if (!escrow.onChainTxHash) throw new Error("On-chain escrow not yet funded on-chain");
 
@@ -319,7 +320,7 @@ export async function resolveDispute(params: {
       await tx
         .update(escrows)
         .set({ status: "funded" })
-        .where(eq(escrows.assignmentId, assignment.id));
+        .where(and(eq(escrows.refId, assignment.jobId), eq(escrows.refType, ESCROW_REF.JOB)));
     } else {
       // Update reputation
       if (params.ruling === "requester_wins") {
@@ -354,7 +355,7 @@ export async function resolveDispute(params: {
           releaseTxHash,
           ...(escrowStatus === "released" ? { releasedAt: new Date() } : { refundedAt: new Date() }),
         })
-        .where(eq(escrows.assignmentId, assignment.id));
+        .where(and(eq(escrows.refId, assignment.jobId), eq(escrows.refType, ESCROW_REF.JOB)));
 
       const newAssignmentStatus = params.ruling === "requester_wins" ? "cancelled" : "accepted";
       validateAssignmentTransition("disputed", newAssignmentStatus, assignment.id);
@@ -504,7 +505,8 @@ export async function openTaskDispute(params: {
     const resolutionDeadline = new Date(Date.now() + DISPUTE_RESOLUTION_DEADLINE_DAYS * 24 * 60 * 60 * 1000);
 
     const [dispute] = await tx.insert(disputes).values({
-      taskId: params.taskId,
+      entityId: params.taskId,
+      entityType: DISPUTE_ENTITY.TASK,
       openerAgentId: params.openerAgentId,
       reason: params.reason,
       depositAmount,
@@ -541,8 +543,8 @@ export async function openGigOrderDispute(params: {
 
     // Calculate deposit from escrow
     let depositAmount = "0";
-    if (order.escrowId) {
-      const [escrow] = await tx.select().from(escrows).where(eq(escrows.id, order.escrowId));
+    {
+      const [escrow] = await tx.select().from(escrows).where(and(eq(escrows.refId, order.id), eq(escrows.refType, ESCROW_REF.GIG_ORDER)));
       if (escrow) {
         depositAmount = ((parseFloat(escrow.amount) * DISPUTE_DEPOSIT_BPS) / 10000).toString();
         validateEscrowTransition(escrow.status, "disputed", escrow.id);
@@ -563,7 +565,8 @@ export async function openGigOrderDispute(params: {
     const resolutionDeadline = new Date(Date.now() + DISPUTE_RESOLUTION_DEADLINE_DAYS * 24 * 60 * 60 * 1000);
 
     const [dispute] = await tx.insert(disputes).values({
-      gigOrderId: params.gigOrderId,
+      entityId: params.gigOrderId,
+      entityType: DISPUTE_ENTITY.GIG_ORDER,
       openerAgentId: params.openerAgentId,
       reason: params.reason,
       depositAmount,

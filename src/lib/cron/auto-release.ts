@@ -29,7 +29,7 @@ import {
 } from "@/lib/services/state-machine";
 import { checkAutoReleaseReady, oracleRelease } from "@/lib/bsc/escrow-contract";
 import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
-import { CRON_BATCH_LIMIT } from "@/lib/config";
+import { CRON_BATCH_LIMIT, ESCROW_REF } from "@/lib/config";
 
 /**
  * Helper: check on-chain readiness, release, then update DB.
@@ -82,7 +82,7 @@ export async function runAutoRelease() {
       onChainTxHash: escrows.onChainTxHash,
     })
     .from(assignments)
-    .leftJoin(escrows, eq(escrows.assignmentId, assignments.id))
+    .leftJoin(escrows, and(eq(escrows.refId, assignments.jobId), eq(escrows.refType, ESCROW_REF.JOB)))
     .where(
       and(
         eq(assignments.status, "submitted"),
@@ -191,7 +191,6 @@ export async function runAutoRelease() {
     .select({
       id: gigOrders.id,
       status: gigOrders.status,
-      escrowId: gigOrders.escrowId,
     })
     .from(gigOrders)
     .where(
@@ -206,11 +205,11 @@ export async function runAutoRelease() {
 
   for (const order of overdueGigOrders) {
     try {
-      if (order.escrowId) {
+      {
         const [escrow] = await db
           .select({ id: escrows.id, refId: escrows.refId, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
           .from(escrows)
-          .where(eq(escrows.id, order.escrowId));
+          .where(and(eq(escrows.refId, order.id), eq(escrows.refType, ESCROW_REF.GIG_ORDER)));
 
         if (escrow && escrow.refId) {
           const txHash = await releaseEscrowIfReady(escrow.id, escrow.refId, escrow.status, escrow.onChainTxHash, now);

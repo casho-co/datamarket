@@ -14,7 +14,7 @@ import { emitFeedEvent } from "@/lib/services/feed";
 import { validateEscrowTransition } from "@/lib/services/state-machine";
 import { oracleRefund } from "@/lib/bsc/escrow-contract";
 import { giveOnChainFeedback } from "@/lib/bsc/erc8004";
-import { CRON_BATCH_LIMIT } from "@/lib/config";
+import { CRON_BATCH_LIMIT, ESCROW_REF } from "@/lib/config";
 
 export async function runOverdueRelease() {
   const now = new Date();
@@ -45,7 +45,8 @@ export async function runOverdueRelease() {
         .from(escrows)
         .where(
           and(
-            eq(escrows.assignmentId, assignment.id),
+            eq(escrows.refId, assignment.jobId),
+            eq(escrows.refType, ESCROW_REF.JOB),
             eq(escrows.status, "funded")
           )
         );

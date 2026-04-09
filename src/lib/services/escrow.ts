@@ -33,7 +33,7 @@ import {
 } from "./state-machine";
 import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
 import type { SupportedToken } from "@/lib/bsc/constants";
-import { ESCROW_DEADLINE_HOURS, ESCROW_DISPUTE_WINDOW_HOURS, ASSIGNMENT_DEADLINE_BUFFER_SECONDS } from "@/lib/config";
+import { ESCROW_DEADLINE_HOURS, ESCROW_DISPUTE_WINDOW_HOURS, ASSIGNMENT_DEADLINE_BUFFER_SECONDS, ESCROW_REF } from "@/lib/config";
 import { processPaymentWithBuyback, type BuybackResult } from "@/lib/bsc/buyback";
 
 /**
@@ -130,7 +130,7 @@ export async function awardJob(params: {
   const [escrow] = await db
     .select()
     .from(escrows)
-    .where(and(eq(escrows.refId, params.jobId), eq(escrows.refType, "job"), eq(escrows.status, "funded")));
+    .where(and(eq(escrows.refId, params.jobId), eq(escrows.refType, ESCROW_REF.JOB), eq(escrows.status, "funded")));
   if (!escrow) throw new Error("Job escrow not found — job may not be funded");
 
   const [recipient] = await db
@@ -181,14 +181,10 @@ export async function awardJob(params: {
       })
       .returning();
 
-    // Link escrow to assignment and set recipient + amount
+    // Set recipient + amount on escrow (refId already = jobId from creation)
     await tx
       .update(escrows)
-      .set({
-        assignmentId: assignment.id,
-        recipientAgentId: bid.bidderAgentId,
-        amount,
-      })
+      .set({ recipientAgentId: bid.bidderAgentId, amount })
       .where(eq(escrows.id, escrow.id));
 
     // Set expiresAt to match assignment deadline
@@ -319,7 +315,7 @@ export async function submitWork(params: {
     const [escrow] = await db
       .select()
       .from(escrows)
-      .where(eq(escrows.assignmentId, result.assignmentId));
+      .where(and(eq(escrows.refId, params.jobId), eq(escrows.refType, ESCROW_REF.JOB)));
     if (escrow && escrow.onChainTxHash) {
       const delivHash = hashDeliverable(delivContent!);
       await onChainSubmitWork(escrow.refId, delivHash);
@@ -366,7 +362,7 @@ export async function acceptWork(params: {
       onChainTxHash: escrows.onChainTxHash,
     })
     .from(assignments)
-    .leftJoin(escrows, eq(escrows.assignmentId, assignments.id))
+    .leftJoin(escrows, and(eq(escrows.refId, assignments.jobId), eq(escrows.refType, ESCROW_REF.JOB)))
     .where(
       and(
         eq(assignments.jobId, params.jobId),
@@ -663,7 +659,6 @@ export async function createOnChainEscrow(params: {
   token: SupportedToken;
   refId: string;
   refType: "job" | "task" | "gig_order" | "bounty_claim";
-  assignmentId?: string;
   deadlineHours?: number;
   disputeWindowHours?: number;
 }) {
@@ -690,7 +685,6 @@ export async function createOnChainEscrow(params: {
     .values({
       refId: params.refId,
       refType: params.refType,
-      assignmentId: params.assignmentId || null,
       funderAgentId: params.funderAgentId,
       recipientAgentId: params.recipientAgentId,
       amount: params.amount,
@@ -700,7 +694,7 @@ export async function createOnChainEscrow(params: {
   try {
     const escrowResult = agentCreateEscrow({
       walletAddress: funder.walletAddress,
-      refId: escrow.id,
+      refId: params.refId,
       sellerAddress: recipient.walletAddress,
       token: params.token,
       amount: params.amount,

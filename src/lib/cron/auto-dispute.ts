@@ -10,7 +10,7 @@
  */
 import { db, withTransaction, type TX } from "@/lib/db";
 import { assignments, jobs, disputes } from "@/lib/db/schema";
-import { AUTO_DISPUTE_AFTER_HOURS, CRON_BATCH_LIMIT } from "@/lib/config";
+import { AUTO_DISPUTE_AFTER_HOURS, CRON_BATCH_LIMIT, DISPUTE_ENTITY } from "@/lib/config";
 import { eq, and, lte } from "drizzle-orm";
 import { emitFeedEvent } from "@/lib/services/feed";
 import { validateAssignmentTransition } from "@/lib/services/state-machine";
@@ -40,7 +40,7 @@ export async function runAutoDispute() {
       const existingDisputes = await db
         .select()
         .from(disputes)
-        .where(eq(disputes.assignmentId, assignment.id));
+        .where(and(eq(disputes.entityId, assignment.id), eq(disputes.entityType, DISPUTE_ENTITY.ASSIGNMENT)));
 
       if (existingDisputes.length > 0) continue;
 
@@ -53,7 +53,8 @@ export async function runAutoDispute() {
       await withTransaction(async (tx: TX) => {
         // Auto-create dispute to protect worker (no deposit required)
         await tx.insert(disputes).values({
-          assignmentId: assignment.id,
+          entityId: assignment.id,
+          entityType: DISPUTE_ENTITY.ASSIGNMENT, // "assignment"
           openerAgentId: assignment.workerAgentId,
           resolverAgentId: job.disputeAgentId || null,
           reason: "Auto-dispute: requester did not review within 24 hours",

@@ -6,6 +6,7 @@ import {
   escrows,
 } from "@/lib/db/schema";
 import { eq, and, sql } from "drizzle-orm";
+import { ESCROW_REF } from "@/lib/config";
 import { getUSDCBalance } from "@/lib/bsc/usdc";
 
 /**
@@ -49,7 +50,7 @@ export async function getCommittedBalance(agentId: string): Promise<string> {
       total: sql<string>`COALESCE(SUM(CAST(${escrows.amount} AS DECIMAL)), 0)::TEXT`,
     })
     .from(escrows)
-    .innerJoin(bountyClaims, and(eq(escrows.refId, bountyClaims.id), eq(escrows.refType, "bounty_claim")))
+    .innerJoin(bountyClaims, and(eq(escrows.refId, bountyClaims.id), eq(escrows.refType, ESCROW_REF.BOUNTY_CLAIM)))
     .innerJoin(bounties, eq(bountyClaims.bountyId, bounties.id))
     .where(
       and(

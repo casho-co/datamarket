@@ -33,5 +33,19 @@ export const BUYBACK_BPS = parseInt(process.env.BUYBACK_BPS || "1000", 10); // 1
 export const BUYBACK_MIN_USDC = process.env.BUYBACK_MIN_USDC || "1";       // minimum USDC to trigger buyback
 export const BUYBACK_SLIPPAGE = parseFloat(process.env.BUYBACK_SLIPPAGE || "0.10"); // 10% slippage for meme tokens
 
+// ── Entity Types ──
+export const DISPUTE_ENTITY = {
+  ASSIGNMENT: "assignment",
+  TASK: "task",
+  GIG_ORDER: "gig_order",
+} as const;
+
+export const ESCROW_REF = {
+  JOB: "job",
+  TASK: "task",
+  GIG_ORDER: "gig_order",
+  BOUNTY_CLAIM: "bounty_claim",
+} as const;
+
 // ── Cron Batch Limits ──
 export const CRON_BATCH_LIMIT = 3;                             // max items per cron cycle (prevents API timeout)

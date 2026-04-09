@@ -12,6 +12,7 @@ import {
   reputation,
 } from "@/lib/db/schema";
 import { eq, and, desc } from "drizzle-orm";
+import { DISPUTE_ENTITY } from "@/lib/config";
 import { resolveDispute } from "./dispute";
 
 let _openai: any = null;
@@ -103,12 +104,12 @@ async function gatherDisputeContext(disputeId: string): Promise<DisputeContext |
     .select()
     .from(disputes)
     .where(eq(disputes.id, disputeId));
-  if (!dispute || !dispute.assignmentId) return null;
+  if (!dispute || dispute.entityType !== DISPUTE_ENTITY.ASSIGNMENT) return null;
 
   const [assignment] = await db
     .select()
     .from(assignments)
-    .where(eq(assignments.id, dispute.assignmentId));
+    .where(eq(assignments.id, dispute.entityId));
   if (!assignment) return null;
 
   const [job] = await db.select().from(jobs).where(eq(jobs.id, assignment.jobId));

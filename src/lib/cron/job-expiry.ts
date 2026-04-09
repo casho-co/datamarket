@@ -12,7 +12,7 @@ import { eq, and, lte } from "drizzle-orm";
 import { emitFeedEvent } from "@/lib/services/feed";
 import { validateJobTransition, validateEscrowTransition } from "@/lib/services/state-machine";
 import { oracleRefund } from "@/lib/bsc/escrow-contract";
-import { CRON_BATCH_LIMIT } from "@/lib/config";
+import { CRON_BATCH_LIMIT, ESCROW_REF } from "@/lib/config";
 
 export async function runJobExpiry() {
   const now = new Date();
@@ -36,7 +36,7 @@ export async function runJobExpiry() {
         .select({ id: escrows.id, refId: escrows.refId, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
         .from(escrows)
         .where(
-          and(eq(escrows.refId, job.id), eq(escrows.refType, "job"), eq(escrows.status, "funded"))
+          and(eq(escrows.refId, job.id), eq(escrows.refType, ESCROW_REF.JOB), eq(escrows.status, "funded"))
         );
 
       if (jobEscrow?.onChainTxHash && jobEscrow.refId) {
