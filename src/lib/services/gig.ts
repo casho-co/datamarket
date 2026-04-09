@@ -154,12 +154,20 @@ export async function orderGig(params: {
   buyerAgentId: string;
   requirements?: string;
 }) {
+  // ── Pre-validate outside transaction (includes RPC call) ──
+  const [gig] = await db.select().from(gigs).where(eq(gigs.id, params.gigId));
+  if (!gig) throw new Error("Gig not found");
+  if (gig.status !== "active") throw new Error("Gig not active");
+  if (gig.sellerAgentId === params.buyerAgentId)
+    throw new Error("Cannot order your own gig");
+
+  const hasFunds = await checkSufficientBalance(params.buyerAgentId, gig.price);
+  if (!hasFunds) throw new Error("Insufficient on-chain USDC balance");
+
   const result = await withTransaction(async (tx: TX) => {
-    const [gig] = await tx.select().from(gigs).where(eq(gigs.id, params.gigId));
-    if (!gig) throw new Error("Gig not found");
-    if (gig.status !== "active") throw new Error("Gig not active");
-    if (gig.sellerAgentId === params.buyerAgentId)
-      throw new Error("Cannot order your own gig");
+    // Re-validate inside transaction
+    const [g] = await tx.select().from(gigs).where(eq(gigs.id, params.gigId));
+    if (!g || g.status !== "active") throw new Error("Gig no longer active");
 
     // Check active order limit
     const activeOrders = await tx
@@ -176,20 +184,16 @@ export async function orderGig(params: {
       throw new Error("Seller has reached max active orders for this gig");
     }
 
-    // Verify buyer has sufficient on-chain USDC balance
-    const hasFunds = await checkSufficientBalance(params.buyerAgentId, gig.price);
-    if (!hasFunds) throw new Error("Insufficient on-chain USDC balance");
-
     // Create order first
     const deliverBy = new Date(
-      Date.now() + gig.deliveryDays * 24 * 60 * 60 * 1000
+      Date.now() + g.deliveryDays * 24 * 60 * 60 * 1000
     );
     const [order] = await tx
       .insert(gigOrders)
       .values({
         gigId: params.gigId,
         buyerAgentId: params.buyerAgentId,
-        sellerAgentId: gig.sellerAgentId,
+        sellerAgentId: g.sellerAgentId,
         requirements: params.requirements || null,
         deliverBy,
       })
@@ -202,8 +206,8 @@ export async function orderGig(params: {
         refId: order.id,
         refType: ESCROW_REF.GIG_ORDER,
         funderAgentId: params.buyerAgentId,
-        recipientAgentId: gig.sellerAgentId,
-        amount: gig.price,
+        recipientAgentId: g.sellerAgentId,
+        amount: g.price,
       })
       .returning();
 
@@ -216,7 +220,7 @@ export async function orderGig(params: {
       })
       .where(eq(gigs.id, params.gigId));
 
-    return { order, escrow, sellerAgentId: gig.sellerAgentId, price: gig.price };
+    return { order, escrow, sellerAgentId: g.sellerAgentId, price: g.price };
   });
 
   // Build on-chain escrow tx for buyer to sign
@@ -332,47 +336,49 @@ export async function acceptGigDelivery(params: {
   orderId: string;
   buyerAgentId: string;
 }) {
+  // ── Pre-validate (no locks) ──
+  const [order] = await db
+    .select()
+    .from(gigOrders)
+    .where(eq(gigOrders.id, params.orderId));
+
+  if (!order) throw new Error("Order not found");
+  if (order.buyerAgentId !== params.buyerAgentId)
+    throw new Error("Not the buyer");
+
+  validateGigOrderTransition(order.status, "completed", order.id);
+
+  // ── On-chain release BEFORE DB transaction ──
+  let releaseTxHash: string | null = null;
+  const [escrow] = await db
+    .select()
+    .from(escrows)
+    .where(and(eq(escrows.refId, params.orderId), eq(escrows.refType, ESCROW_REF.GIG_ORDER)));
+
+  if (escrow && escrow.status === "funded") {
+    if (!escrow.onChainTxHash) {
+      throw new Error("On-chain escrow not yet funded on-chain");
+    }
+    validateEscrowTransition(escrow.status, "released", escrow.id);
+    releaseTxHash = await onChainRelease(escrow.refId);
+  }
+
+  // ── DB transaction — short, no RPC ──
   const result = await withTransaction(async (tx: TX) => {
-    const [order] = await tx
-      .select()
-      .from(gigOrders)
-      .where(eq(gigOrders.id, params.orderId));
+    if (releaseTxHash && escrow) {
+      await tx
+        .update(escrows)
+        .set({ status: "released", releasedAt: new Date(), releaseTxHash })
+        .where(eq(escrows.id, escrow.id));
 
-    if (!order) throw new Error("Order not found");
-    if (order.buyerAgentId !== params.buyerAgentId)
-      throw new Error("Not the buyer");
-
-    validateGigOrderTransition(order.status, "completed", order.id);
-
-    // Release escrow on-chain
-    let releasedEscrow: { id: string; amount: string } | null = null;
-    {
-      const [escrow] = await tx
-        .select()
-        .from(escrows)
-        .where(and(eq(escrows.refId, params.orderId), eq(escrows.refType, ESCROW_REF.GIG_ORDER)));
-
-      if (escrow && escrow.status === "funded") {
-        if (!escrow.onChainTxHash) {
-          throw new Error("On-chain escrow not yet funded on-chain");
-        }
-        validateEscrowTransition(escrow.status, "released", escrow.id);
-        const releaseTxHash = await onChainRelease(escrow.refId);
-        await tx
-          .update(escrows)
-          .set({ status: "released", releasedAt: new Date(), releaseTxHash })
-          .where(eq(escrows.id, escrow.id));
-        releasedEscrow = { id: escrow.id, amount: escrow.amount };
-
-        await tx
-          .update(reputation)
-          .set({
-            completedJobs: sql`${reputation.completedJobs} + 1`,
-            totalEarned: sql`(CAST(${reputation.totalEarned} AS DECIMAL) + ${parseFloat(escrow.amount)})::TEXT`,
-            updatedAt: new Date(),
-          })
-          .where(eq(reputation.agentId, order.sellerAgentId));
-      }
+      await tx
+        .update(reputation)
+        .set({
+          completedJobs: sql`${reputation.completedJobs} + 1`,
+          totalEarned: sql`(CAST(${reputation.totalEarned} AS DECIMAL) + ${parseFloat(escrow.amount)})::TEXT`,
+          updatedAt: new Date(),
+        })
+        .where(eq(reputation.agentId, order.sellerAgentId));
     }
 
     await tx
@@ -380,13 +386,13 @@ export async function acceptGigDelivery(params: {
       .set({ status: "completed", completedAt: new Date() })
       .where(eq(gigOrders.id, params.orderId));
 
-    return { order, releasedEscrow };
+    return { releasedEscrow: escrow && releaseTxHash ? { id: escrow.id, amount: escrow.amount } : null };
   });
 
   // Post-tx: buyback-and-burn for seller agent's token (best-effort, non-blocking)
   if (result.releasedEscrow) {
     tryBuybackForAgent(
-      result.order.sellerAgentId,
+      order.sellerAgentId,
       result.releasedEscrow.amount,
       result.releasedEscrow.id
     ).catch(() => {
@@ -394,14 +400,14 @@ export async function acceptGigDelivery(params: {
     });
   }
 
-  await updateReputation(result.order.sellerAgentId);
+  await updateReputation(order.sellerAgentId);
 
   // On-chain reputation feedback for gig completion
   try {
     const [seller] = await db
       .select({ erc8004AgentId: agents.erc8004AgentId, mcpEndpoint: agents.mcpEndpoint })
       .from(agents)
-      .where(eq(agents.id, result.order.sellerAgentId));
+      .where(eq(agents.id, order.sellerAgentId));
     if (seller?.erc8004AgentId) {
       const baseUrl = process.env.NEXT_PUBLIC_BASE_URL || "https://datalayer-market.fly.dev";
       await giveOnChainFeedback({
@@ -472,46 +478,52 @@ export async function cancelGigOrder(params: {
   orderId: string;
   buyerAgentId: string;
 }) {
-  return withTransaction(async (tx: TX) => {
-    const [order] = await tx
-      .select()
-      .from(gigOrders)
-      .where(eq(gigOrders.id, params.orderId));
+  // ── Pre-validate ──
+  const [order] = await db
+    .select()
+    .from(gigOrders)
+    .where(eq(gigOrders.id, params.orderId));
 
-    if (!order) throw new Error("Order not found");
-    if (order.buyerAgentId !== params.buyerAgentId)
-      throw new Error("Not the buyer");
+  if (!order) throw new Error("Order not found");
+  if (order.buyerAgentId !== params.buyerAgentId)
+    throw new Error("Not the buyer");
 
-    validateGigOrderTransition(order.status, "cancelled", order.id);
+  validateGigOrderTransition(order.status, "cancelled", order.id);
 
-    // Refund escrow on-chain
-    {
-      const [escrow] = await tx
-        .select()
-        .from(escrows)
-        .where(and(eq(escrows.refId, params.orderId), eq(escrows.refType, ESCROW_REF.GIG_ORDER)));
+  // ── On-chain refund BEFORE DB transaction ──
+  let refundTxHash: string | null = null;
+  const [escrow] = await db
+    .select()
+    .from(escrows)
+    .where(and(eq(escrows.refId, params.orderId), eq(escrows.refType, ESCROW_REF.GIG_ORDER)));
 
-      if (escrow && escrow.status === "funded") {
-        if (!escrow.onChainTxHash) {
-          throw new Error("On-chain escrow not yet funded on-chain");
-        }
-        validateEscrowTransition(escrow.status, "refunded", escrow.id);
-        const refundTxHash = await onChainRefund(escrow.refId);
-        await tx
-          .update(escrows)
-          .set({ status: "refunded", refundedAt: new Date(), releaseTxHash: refundTxHash })
-          .where(eq(escrows.id, escrow.id));
-      }
+  if (escrow && escrow.status === "funded") {
+    if (!escrow.onChainTxHash) {
+      throw new Error("On-chain escrow not yet funded on-chain");
+    }
+    validateEscrowTransition(escrow.status, "refunded", escrow.id);
+    refundTxHash = await onChainRefund(escrow.refId);
+  }
+
+  // ── DB transaction — short, no RPC ──
+  const updated = await withTransaction(async (tx: TX) => {
+    if (refundTxHash && escrow) {
+      await tx
+        .update(escrows)
+        .set({ status: "refunded", refundedAt: new Date(), releaseTxHash: refundTxHash })
+        .where(eq(escrows.id, escrow.id));
     }
 
-    const [updated] = await tx
+    const [result] = await tx
       .update(gigOrders)
       .set({ status: "cancelled" })
       .where(eq(gigOrders.id, params.orderId))
       .returning();
 
-    return updated;
+    return result;
   });
+
+  return updated;
 }
 
 // ── List / Get ──
@@ -531,10 +543,11 @@ export async function listGigs(params: {
   let query = db.select().from(gigs).where(eq(gigs.status, "active")).$dynamic();
 
   if (params.search) {
+    const escaped = params.search.replace(/[%_]/g, "\\$&");
     query = query.where(
       or(
-        ilike(gigs.title, `%${params.search}%`),
-        ilike(gigs.description, `%${params.search}%`)
+        ilike(gigs.title, `%${escaped}%`),
+        ilike(gigs.description, `%${escaped}%`)
       )
     );
   }

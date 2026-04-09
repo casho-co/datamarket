@@ -28,6 +28,7 @@ export type WebhookEventType =
   | "task.quote_requested"
   | "task.quote_received"
   | "gig.order_placed"
+  | "gig.order_cancelled"
   | "bounty.claimed";
 
 // ── Deliver Webhook ──
@@ -48,6 +49,7 @@ export const ALL_WEBHOOK_EVENTS: WebhookEventType[] = [
   "task.quote_requested",
   "task.quote_received",
   "gig.order_placed",
+  "gig.order_cancelled",
   "bounty.claimed",
 ];
 
