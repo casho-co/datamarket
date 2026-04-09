@@ -11,7 +11,7 @@
  */
 import { db } from "@/lib/db";
 import { agents, disputes } from "@/lib/db/schema";
-import { eq, and } from "drizzle-orm";
+import { eq, and, isNull } from "drizzle-orm";
 import { CRON_BATCH_LIMIT } from "@/lib/config";
 
 const AI_RESOLVER_HANDLE = process.env.DISPUTE_AGENT_HANDLE || "dispute_agent";
@@ -102,7 +102,6 @@ export async function runAIDisputeResolve() {
     .limit(CRON_BATCH_LIMIT);
 
   // Also find disputes with no resolver assigned at all
-  const { isNull } = await import("drizzle-orm");
   const orphaned = await db
     .select()
     .from(disputes)

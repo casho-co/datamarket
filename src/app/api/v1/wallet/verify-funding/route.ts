@@ -6,7 +6,7 @@ import { logAudit, getClientIp } from "@/lib/services/audit";
 import { withTransaction } from "@/lib/db";
 import { jobs, escrows, reputation } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
-import { getOnChainEscrow, parseTokenAmount } from "@/lib/bsc/escrow-contract";
+import { getOnChainEscrow, parseTokenAmount, OnChainEscrowState } from "@/lib/bsc/escrow-contract";
 import { getPublicClient } from "@/lib/bsc/client";
 import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
 import { emitFeedEvent } from "@/lib/services/feed";
@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
 
     const onChainEscrow = await getOnChainEscrow(job_id);
 
-    if (onChainEscrow.state !== 1) {
+    if (onChainEscrow.state !== OnChainEscrowState.FUNDED) {
       return NextResponse.json({ error: "On-chain escrow not in FUNDED state" }, { status: 400 });
     }
     if (onChainEscrow.buyer.toLowerCase() !== walletAddress.toLowerCase()) {
