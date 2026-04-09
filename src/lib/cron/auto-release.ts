@@ -37,17 +37,18 @@ import { CRON_BATCH_LIMIT } from "@/lib/config";
  */
 async function releaseEscrowIfReady(
   escrowId: string,
+  escrowRefId: string,
   escrowStatus: string,
   onChainTxHash: string | null,
   now: Date
 ): Promise<string | null> {
   if (escrowStatus !== "funded" || !onChainTxHash) return null;
 
-  const ready = await checkAutoReleaseReady(escrowId);
+  const ready = await checkAutoReleaseReady(escrowRefId);
   if (!ready) return null;
 
   validateEscrowTransition(escrowStatus, "released", escrowId);
-  const releaseTxHash = await oracleRelease(escrowId);
+  const releaseTxHash = await oracleRelease(escrowRefId);
 
   await db
     .update(escrows)
@@ -75,6 +76,7 @@ export async function runAutoRelease() {
       workerAgentId: assignments.workerAgentId,
       status: assignments.status,
       escrowId: escrows.id,
+      escrowRefId: escrows.refId,
       escrowStatus: escrows.status,
       escrowAmount: escrows.amount,
       onChainTxHash: escrows.onChainTxHash,
@@ -94,8 +96,8 @@ export async function runAutoRelease() {
   for (const row of overdueAssignments) {
     try {
       // On-chain release first
-      if (row.escrowId && row.escrowStatus && row.onChainTxHash) {
-        const txHash = await releaseEscrowIfReady(row.escrowId, row.escrowStatus, row.onChainTxHash, now);
+      if (row.escrowId && row.escrowRefId && row.escrowStatus && row.onChainTxHash) {
+        const txHash = await releaseEscrowIfReady(row.escrowId, row.escrowRefId, row.escrowStatus, row.onChainTxHash, now);
         if (txHash) {
           await db
             .update(reputation)
@@ -151,12 +153,12 @@ export async function runAutoRelease() {
     try {
       if (task.escrowId) {
         const [escrow] = await db
-          .select({ id: escrows.id, status: escrows.status, onChainTxHash: escrows.onChainTxHash, amount: escrows.amount })
+          .select({ id: escrows.id, refId: escrows.refId, status: escrows.status, onChainTxHash: escrows.onChainTxHash, amount: escrows.amount })
           .from(escrows)
           .where(eq(escrows.id, task.escrowId));
 
-        if (escrow) {
-          const txHash = await releaseEscrowIfReady(escrow.id, escrow.status, escrow.onChainTxHash, now);
+        if (escrow && escrow.refId) {
+          const txHash = await releaseEscrowIfReady(escrow.id, escrow.refId, escrow.status, escrow.onChainTxHash, now);
           if (txHash && task.workerAgentId) {
             await db
               .update(reputation)
@@ -206,12 +208,12 @@ export async function runAutoRelease() {
     try {
       if (order.escrowId) {
         const [escrow] = await db
-          .select({ id: escrows.id, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
+          .select({ id: escrows.id, refId: escrows.refId, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
           .from(escrows)
           .where(eq(escrows.id, order.escrowId));
 
-        if (escrow) {
-          const txHash = await releaseEscrowIfReady(escrow.id, escrow.status, escrow.onChainTxHash, now);
+        if (escrow && escrow.refId) {
+          const txHash = await releaseEscrowIfReady(escrow.id, escrow.refId, escrow.status, escrow.onChainTxHash, now);
           if (escrow.status === "funded" && !txHash) continue;
         }
       }
@@ -250,12 +252,12 @@ export async function runAutoRelease() {
     try {
       if (claim.escrowId) {
         const [escrow] = await db
-          .select({ id: escrows.id, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
+          .select({ id: escrows.id, refId: escrows.refId, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
           .from(escrows)
           .where(eq(escrows.id, claim.escrowId));
 
-        if (escrow) {
-          const txHash = await releaseEscrowIfReady(escrow.id, escrow.status, escrow.onChainTxHash, now);
+        if (escrow && escrow.refId) {
+          const txHash = await releaseEscrowIfReady(escrow.id, escrow.refId, escrow.status, escrow.onChainTxHash, now);
           if (escrow.status === "funded" && !txHash) continue;
         }
       }
@@ -275,7 +277,7 @@ export async function runAutoRelease() {
   // ── 5. On-Chain Escrow Auto-Release ──
   if (ESCROW_CONTRACT_ADDRESS) {
     const onChainEscrows = await db
-      .select({ id: escrows.id, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
+      .select({ id: escrows.id, refId: escrows.refId, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
       .from(escrows)
       .where(
         and(
@@ -287,8 +289,9 @@ export async function runAutoRelease() {
       .limit(CRON_BATCH_LIMIT);
 
     for (const esc of onChainEscrows) {
+      if (!esc.refId) continue;
       try {
-        const txHash = await releaseEscrowIfReady(esc.id, esc.status, esc.onChainTxHash, now);
+        const txHash = await releaseEscrowIfReady(esc.id, esc.refId, esc.status, esc.onChainTxHash, now);
         if (txHash) released++;
       } catch {
         // Continue

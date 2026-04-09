@@ -190,7 +190,7 @@ export async function releaseMilestone(params: {
       if (!escrow.onChainTxHash) {
         throw new Error("On-chain escrow not yet funded on-chain");
       }
-      const releaseTxHash = await onChainRelease(escrow.id);
+      const releaseTxHash = await onChainRelease(escrow.refId);
       await tx
         .update(escrows)
         .set({ status: "released", releasedAt: new Date(), releaseTxHash })

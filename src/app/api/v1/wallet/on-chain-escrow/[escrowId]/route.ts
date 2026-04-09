@@ -62,7 +62,7 @@ export async function GET(
   // Fetch on-chain contract state
   if (ESCROW_CONTRACT_ADDRESS) {
     try {
-      const onChain = await getOnChainEscrow(escrowId);
+      const onChain = await getOnChainEscrow(escrow.refId);
       response.on_chain_state = {
         state: STATE_LABELS[onChain.state] || "unknown",
         buyer: onChain.buyer,

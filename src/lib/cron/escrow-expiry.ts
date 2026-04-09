@@ -22,7 +22,7 @@ export async function runEscrowExpiry() {
   const now = new Date();
 
   const expiredEscrows = await db
-    .select({ id: escrows.id, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
+    .select({ id: escrows.id, refId: escrows.refId, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
     .from(escrows)
     .where(
       and(
@@ -38,12 +38,12 @@ export async function runEscrowExpiry() {
 
   for (const escrow of expiredEscrows) {
     try {
-      if (!escrow.onChainTxHash) continue;
+      if (!escrow.onChainTxHash || !escrow.refId) continue;
 
       validateEscrowTransition(escrow.status, "refunded", escrow.id);
 
-      // On-chain refund first
-      const refundTxHash = await oracleRefund(escrow.id);
+      // On-chain refund first (use refId — the jobId used when creating on-chain escrow)
+      const refundTxHash = await oracleRefund(escrow.refId);
 
       // DB update after on-chain success
       await db

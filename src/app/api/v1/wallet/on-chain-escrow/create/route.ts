@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
       .returning();
 
     const txData = buildCreateEscrowData({
-      refId: pendingEscrow.id,
+      refId: pendingEscrow.refId,
       seller: recipient.walletAddress,
       token,
       amount,

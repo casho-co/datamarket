@@ -52,7 +52,7 @@ export async function POST(req: NextRequest) {
 
   try {
     // All agents are non-custodial — return unsigned tx data
-    const txData = buildReleaseData(escrow_id);
+    const txData = buildReleaseData(escrow.refId);
 
     return withRateLimitHeaders(
       NextResponse.json({

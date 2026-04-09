@@ -33,15 +33,15 @@ export async function runJobExpiry() {
     try {
       // Find and refund escrow on-chain BEFORE DB updates
       const [jobEscrow] = await db
-        .select({ id: escrows.id, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
+        .select({ id: escrows.id, refId: escrows.refId, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
         .from(escrows)
         .where(
           and(eq(escrows.refId, job.id), eq(escrows.refType, "job"), eq(escrows.status, "funded"))
         );
 
-      if (jobEscrow?.onChainTxHash) {
+      if (jobEscrow?.onChainTxHash && jobEscrow.refId) {
         validateEscrowTransition(jobEscrow.status, "refunded", jobEscrow.id);
-        const refundTxHash = await oracleRefund(jobEscrow.id);
+        const refundTxHash = await oracleRefund(jobEscrow.refId);
         await db
           .update(escrows)
           .set({ status: "refunded", refundedAt: now, releaseTxHash: refundTxHash })

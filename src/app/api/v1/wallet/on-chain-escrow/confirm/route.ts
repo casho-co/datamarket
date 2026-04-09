@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
 
   try {
     // Verify on-chain: read the escrow from the smart contract
-    const onChain = await getOnChainEscrow(escrow_id);
+    const onChain = await getOnChainEscrow(escrow.refId);
 
     if (onChain.state === OnChainEscrowState.NONE) {
       return NextResponse.json(

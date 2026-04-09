@@ -41,7 +41,7 @@ export async function runOverdueRelease() {
     try {
       // Find escrow for this assignment
       const [escrow] = await db
-        .select({ id: escrows.id, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
+        .select({ id: escrows.id, refId: escrows.refId, status: escrows.status, onChainTxHash: escrows.onChainTxHash })
         .from(escrows)
         .where(
           and(
@@ -52,9 +52,9 @@ export async function runOverdueRelease() {
 
       // On-chain refund BEFORE DB updates
       let refundTxHash: string | null = null;
-      if (escrow?.onChainTxHash) {
+      if (escrow?.onChainTxHash && escrow.refId) {
         validateEscrowTransition(escrow.status, "refunded", escrow.id);
-        refundTxHash = await oracleRefund(escrow.id);
+        refundTxHash = await oracleRefund(escrow.refId);
       }
 
       // DB updates (no RPC calls, fast)

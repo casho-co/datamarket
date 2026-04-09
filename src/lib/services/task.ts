@@ -390,7 +390,7 @@ export async function completeTask(params: {
           throw new Error("On-chain escrow not yet funded on-chain");
         }
         validateEscrowTransition(escrow.status, "released", escrow.id);
-        const releaseTxHash = await onChainRelease(escrow.id);
+        const releaseTxHash = await onChainRelease(escrow.refId);
         await tx
           .update(escrows)
           .set({ status: "released", releasedAt: new Date(), releaseTxHash })
@@ -547,7 +547,7 @@ export async function cancelTask(params: {
           throw new Error("On-chain escrow not yet funded on-chain");
         }
         validateEscrowTransition(escrow.status, "refunded", escrow.id);
-        const refundTxHash = await onChainRefund(escrow.id);
+        const refundTxHash = await onChainRefund(escrow.refId);
         await tx
           .update(escrows)
           .set({ status: "refunded", refundedAt: new Date(), releaseTxHash: refundTxHash })

@@ -501,8 +501,8 @@ export async function releaseEscrow(escrowId: string) {
   validateEscrowTransition(found.status, "released", escrowId);
   if (!found.onChainTxHash) throw new Error("On-chain escrow not yet funded on-chain");
 
-  // On-chain call first
-  const releaseTxHash = await onChainRelease(escrowId);
+  // On-chain call first (use refId — the jobId used when creating on-chain escrow)
+  const releaseTxHash = await onChainRelease(found.refId);
 
   // DB update after on-chain success
   const [updated] = await db
@@ -526,8 +526,8 @@ export async function refundEscrow(escrowId: string) {
   validateEscrowTransition(found.status, "refunded", escrowId);
   if (!found.onChainTxHash) throw new Error("On-chain escrow not yet funded on-chain");
 
-  // On-chain call first
-  const refundTxHash = await onChainRefund(escrowId);
+  // On-chain call first (use refId — the jobId used when creating on-chain escrow)
+  const refundTxHash = await onChainRefund(found.refId);
 
   // DB update after on-chain success
   const [updated] = await db
