@@ -15,7 +15,6 @@ const createEscrowSchema = z.object({
   token: z.enum(SUPPORTED_TOKENS).default("USDC"),
   deadline_hours: z.number().int().min(1).max(720).default(168),
   dispute_window_hours: z.number().int().min(1).max(168).default(48),
-  assignment_id: z.string().uuid().optional(),
   task_id: z.string().uuid().optional(),
   gig_order_id: z.string().uuid().optional(),
   bounty_claim_id: z.string().uuid().optional(),
@@ -94,7 +93,6 @@ export async function POST(req: NextRequest) {
         funderAgentId: auth.agentId,
         recipientAgentId: recipient_agent_id,
         amount,
-        assignmentId: parsed.data.assignment_id || null,
       })
       .returning();
 

@@ -4,10 +4,11 @@ import { checkRateLimit } from "@/lib/middleware/rate-limit";
 import { logAudit, getClientIp } from "@/lib/services/audit";
 import { db } from "@/lib/db";
 import { disputes, escrows, assignments } from "@/lib/db/schema";
-import { eq } from "drizzle-orm";
+import { eq, and } from "drizzle-orm";
 import { getOnChainEscrow, OnChainEscrowState } from "@/lib/bsc/escrow-contract";
 import { getPublicClient } from "@/lib/bsc/client";
 import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
+import { DISPUTE_ENTITY, ESCROW_REF } from "@/lib/config";
 import { type Hex } from "viem";
 import { z } from "zod";
 
@@ -57,16 +58,24 @@ export async function POST(
       return NextResponse.json({ error: "Not authorized" }, { status: 403 });
     }
 
-    // 3. Get the escrow to check on-chain state
-    if (!dispute.assignmentId) {
-      return NextResponse.json({ error: "No assignment linked" }, { status: 400 });
+    // 3. Get the escrow — dispute can be on assignment, gig order, or task
+    let escrow;
+    if (dispute.entityType === DISPUTE_ENTITY.ASSIGNMENT) {
+      const [row] = await db
+        .select({ escrow: escrows })
+        .from(assignments)
+        .innerJoin(escrows, and(eq(escrows.refId, assignments.jobId), eq(escrows.refType, ESCROW_REF.JOB)))
+        .where(eq(assignments.id, dispute.entityId));
+      escrow = row?.escrow;
+    } else if (dispute.entityType === DISPUTE_ENTITY.GIG_ORDER) {
+      [escrow] = await db.select().from(escrows)
+        .where(and(eq(escrows.refId, dispute.entityId), eq(escrows.refType, ESCROW_REF.GIG_ORDER)));
+    } else if (dispute.entityType === DISPUTE_ENTITY.TASK) {
+      [escrow] = await db.select().from(escrows)
+        .where(and(eq(escrows.refId, dispute.entityId), eq(escrows.refType, ESCROW_REF.TASK)));
     }
-    const [escrow] = await db
-      .select()
-      .from(escrows)
-      .where(eq(escrows.assignmentId, dispute.assignmentId));
     if (!escrow) {
-      return NextResponse.json({ error: "Escrow not found" }, { status: 400 });
+      return NextResponse.json({ error: "Escrow not found for this dispute" }, { status: 400 });
     }
 
     // 4. Verify tx on-chain
