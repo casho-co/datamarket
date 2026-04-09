@@ -10,7 +10,11 @@
  */
 import { db, withTransaction, type TX } from "@/lib/db";
 import { assignments, jobs, disputes } from "@/lib/db/schema";
-import { AUTO_DISPUTE_AFTER_HOURS, CRON_BATCH_LIMIT, DISPUTE_ENTITY } from "@/lib/config";
+import {
+  AUTO_DISPUTE_AFTER_HOURS,
+  CRON_BATCH_LIMIT,
+  DISPUTE_ENTITY,
+} from "@/lib/config";
 import { eq, and, lte } from "drizzle-orm";
 import { emitFeedEvent } from "@/lib/services/feed";
 import { validateAssignmentTransition } from "@/lib/services/state-machine";
@@ -26,8 +30,8 @@ export async function runAutoDispute() {
     .where(
       and(
         eq(assignments.status, "submitted"),
-        lte(assignments.submittedAt, cutoff)
-      )
+        lte(assignments.submittedAt, cutoff),
+      ),
     )
     .orderBy(assignments.submittedAt)
     .limit(CRON_BATCH_LIMIT);
@@ -40,7 +44,12 @@ export async function runAutoDispute() {
       const existingDisputes = await db
         .select()
         .from(disputes)
-        .where(and(eq(disputes.entityId, assignment.id), eq(disputes.entityType, DISPUTE_ENTITY.ASSIGNMENT)));
+        .where(
+          and(
+            eq(disputes.entityId, assignment.id),
+            eq(disputes.entityType, DISPUTE_ENTITY.ASSIGNMENT),
+          ),
+        );
 
       if (existingDisputes.length > 0) continue;
 
@@ -61,7 +70,11 @@ export async function runAutoDispute() {
           depositAmount: "0",
         });
 
-        validateAssignmentTransition(assignment.status, "disputed", assignment.id);
+        validateAssignmentTransition(
+          assignment.status,
+          "disputed",
+          assignment.id,
+        );
         await tx
           .update(assignments)
           .set({ status: "disputed" })
@@ -76,7 +89,10 @@ export async function runAutoDispute() {
 
       processed++;
     } catch (err) {
-      console.error(`[auto-dispute] Failed for assignment ${assignment.id}:`, err instanceof Error ? err.message : err);
+      console.error(
+        `[auto-dispute] Failed for assignment ${assignment.id}:`,
+        err instanceof Error ? err.message : err,
+      );
     }
   }
 
