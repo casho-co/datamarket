@@ -360,6 +360,7 @@ export async function acceptWork(params: {
       workerAgentId: assignments.workerAgentId,
       escrowAmount: assignments.escrowAmount,
       escrowId: escrows.id,
+      escrowRefId: escrows.refId,
       escrowStatus: escrows.status,
       escrowAmount2: escrows.amount,
       onChainTxHash: escrows.onChainTxHash,
@@ -377,7 +378,7 @@ export async function acceptWork(params: {
     throw new Error("No submitted work to accept");
 
   // Validate escrows and collect for release
-  const toRelease: { escrowId: string; assignmentId: string; workerAgentId: string; amount: string }[] = [];
+  const toRelease: { escrowId: string; escrowRefId: string; assignmentId: string; workerAgentId: string; amount: string }[] = [];
   for (const row of rows) {
     if (row.escrowId && row.escrowStatus) {
       validateEscrowTransition(row.escrowStatus, "released", row.escrowId);
@@ -386,6 +387,7 @@ export async function acceptWork(params: {
       }
       toRelease.push({
         escrowId: row.escrowId,
+        escrowRefId: row.escrowRefId!,
         assignmentId: row.assignmentId,
         workerAgentId: row.workerAgentId,
         amount: row.escrowAmount2 || row.escrowAmount,
@@ -396,7 +398,7 @@ export async function acceptWork(params: {
   // ── On-chain accept delivery BEFORE DB transaction (immediate release, no dispute window) ──
   const releasedEscrows: { escrowId: string; workerAgentId: string; amount: string; releaseTxHash: string }[] = [];
   for (const pending of toRelease) {
-    const releaseTxHash = await onChainAcceptDelivery(pending.escrowId);
+    const releaseTxHash = await onChainAcceptDelivery(pending.escrowRefId);
     releasedEscrows.push({ ...pending, releaseTxHash });
   }
 
