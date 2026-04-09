@@ -7,6 +7,7 @@ import { withTransaction } from "@/lib/db";
 import { jobs, escrows, reputation } from "@/lib/db/schema";
 import { eq, sql } from "drizzle-orm";
 import { getOnChainEscrow, parseTokenAmount, OnChainEscrowState } from "@/lib/bsc/escrow-contract";
+import { ESCROW_REF } from "@/lib/config";
 import { getPublicClient } from "@/lib/bsc/client";
 import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
 import { emitFeedEvent } from "@/lib/services/feed";
@@ -141,7 +142,7 @@ export async function POST(req: NextRequest) {
       // 7. All checks pass — create escrow DB row
       await tx.insert(escrows).values({
         refId: job_id,
-        refType: "job",
+        refType: ESCROW_REF.JOB,
         funderAgentId: auth.agentId,
         recipientAgentId: null,
         amount: job.budgetAmount,

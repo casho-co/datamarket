@@ -6,6 +6,7 @@ import { db } from "@/lib/db";
 import { agents, escrows } from "@/lib/db/schema";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
+import { ESCROW_REF } from "@/lib/config";
 import { ESCROW_CONTRACT_ADDRESS, SUPPORTED_TOKENS } from "@/lib/bsc/constants";
 import { safeErrorMessage } from "@/lib/utils/safe-error";
 
@@ -70,16 +71,16 @@ export async function POST(req: NextRequest) {
 
     // Determine refId and refType from the provided entity IDs
     let refId: string;
-    let refType: "job" | "task" | "gig_order" | "bounty_claim";
+    let refType: typeof ESCROW_REF[keyof typeof ESCROW_REF];
     if (parsed.data.task_id) {
       refId = parsed.data.task_id;
-      refType = "task";
+      refType = ESCROW_REF.TASK;
     } else if (parsed.data.gig_order_id) {
       refId = parsed.data.gig_order_id;
-      refType = "gig_order";
+      refType = ESCROW_REF.GIG_ORDER;
     } else if (parsed.data.bounty_claim_id) {
       refId = parsed.data.bounty_claim_id;
-      refType = "bounty_claim";
+      refType = ESCROW_REF.BOUNTY_CLAIM;
     } else {
       return NextResponse.json({ error: "One of task_id, gig_order_id, or bounty_claim_id is required" }, { status: 400 });
     }

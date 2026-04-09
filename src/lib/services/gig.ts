@@ -200,7 +200,7 @@ export async function orderGig(params: {
       .insert(escrows)
       .values({
         refId: order.id,
-        refType: "gig_order",
+        refType: ESCROW_REF.GIG_ORDER,
         funderAgentId: params.buyerAgentId,
         recipientAgentId: gig.sellerAgentId,
         amount: gig.price,

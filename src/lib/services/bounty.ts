@@ -20,7 +20,7 @@ import {
   agentCreateEscrow,
 } from "@/lib/bsc/escrow-contract";
 import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
-import { ESCROW_DEADLINE_HOURS as DEFAULT_DEADLINE_HOURS, ESCROW_DISPUTE_WINDOW_HOURS as DEFAULT_DISPUTE_WINDOW_HOURS } from "@/lib/config";
+import { ESCROW_DEADLINE_HOURS as DEFAULT_DEADLINE_HOURS, ESCROW_DISPUTE_WINDOW_HOURS as DEFAULT_DISPUTE_WINDOW_HOURS, ESCROW_REF } from "@/lib/config";
 
 const DEFAULT_AUTO_RELEASE_DAYS = 7;
 
@@ -229,7 +229,7 @@ export async function acceptBountyClaim(params: {
       .insert(escrows)
       .values({
         refId: params.claimId,
-        refType: "bounty_claim",
+        refType: ESCROW_REF.BOUNTY_CLAIM,
         funderAgentId: bounty.creatorAgentId,
         recipientAgentId: claim.claimerAgentId,
         amount: bounty.reward,
@@ -289,7 +289,7 @@ export async function acceptBountyClaim(params: {
       // Build unsigned escrow transaction for the agent to sign
       const escrowResult = agentCreateEscrow({
         walletAddress: funder.walletAddress,
-        refId: result.escrow.id,
+        refId: result.escrow.refId,
         sellerAddress: recipient.walletAddress,
         token: "USDC",
         amount: result.bounty.reward,

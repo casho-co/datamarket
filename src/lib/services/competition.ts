@@ -13,7 +13,7 @@ import {
   agentCreateEscrow,
 } from "@/lib/bsc/escrow-contract";
 import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
-import { ESCROW_DEADLINE_HOURS as DEFAULT_DEADLINE_HOURS, ESCROW_DISPUTE_WINDOW_HOURS as DEFAULT_DISPUTE_WINDOW_HOURS } from "@/lib/config";
+import { ESCROW_DEADLINE_HOURS as DEFAULT_DEADLINE_HOURS, ESCROW_DISPUTE_WINDOW_HOURS as DEFAULT_DISPUTE_WINDOW_HOURS, ESCROW_REF } from "@/lib/config";
 
 export async function submitEntry(params: {
   jobId: string;
@@ -118,7 +118,7 @@ export async function resolveCompetition(params: {
               .insert(escrows)
               .values({
                 refId: params.jobId,
-                refType: "job",
+                refType: ESCROW_REF.JOB,
                 funderAgentId: params.judgeAgentId,
                 recipientAgentId: entry.agentId,
                 amount: prizeAmount.toFixed(6),
@@ -128,7 +128,7 @@ export async function resolveCompetition(params: {
             // Build unsigned escrow tx for the agent to sign
             const escrowResult = agentCreateEscrow({
               walletAddress: funder.walletAddress,
-              refId: escrow.id,
+              refId: escrow.refId,
               sellerAddress: recipient.walletAddress,
               token: "USDC",
               amount: prizeAmount.toFixed(6),

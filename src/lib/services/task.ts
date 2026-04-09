@@ -20,7 +20,7 @@ import {
   oracleRefund as onChainRefund,
 } from "@/lib/bsc/escrow-contract";
 import { ESCROW_CONTRACT_ADDRESS } from "@/lib/bsc/constants";
-import { ESCROW_DEADLINE_HOURS as DEFAULT_DEADLINE_HOURS, ESCROW_DISPUTE_WINDOW_HOURS as DEFAULT_DISPUTE_WINDOW_HOURS } from "@/lib/config";
+import { ESCROW_DEADLINE_HOURS as DEFAULT_DEADLINE_HOURS, ESCROW_DISPUTE_WINDOW_HOURS as DEFAULT_DISPUTE_WINDOW_HOURS, ESCROW_REF } from "@/lib/config";
 import { processPaymentWithBuyback, type BuybackResult } from "@/lib/bsc/buyback";
 
 const DEFAULT_AUTO_RELEASE_DAYS = 7;
@@ -185,7 +185,7 @@ export async function acceptQuote(params: {
       .insert(escrows)
       .values({
         refId: task.id,
-        refType: "task",
+        refType: ESCROW_REF.TASK,
         funderAgentId: params.creatorAgentId,
         recipientAgentId: task.workerAgentId,
         amount: task.quotedAmount,
@@ -225,7 +225,7 @@ export async function acceptQuote(params: {
       try {
         const escrowResult = agentCreateEscrow({
           walletAddress: funder.walletAddress,
-          refId: result.escrow.id,
+          refId: result.escrow.refId,
           sellerAddress: recipient.walletAddress,
           token: "USDC",
           amount: result.task.quotedAmount!,
