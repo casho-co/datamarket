@@ -5,6 +5,7 @@ CREATE TYPE "public"."bid_status" AS ENUM('pending', 'accepted', 'rejected', 'wi
 CREATE TYPE "public"."bounty_claim_status" AS ENUM('active', 'submitted', 'accepted', 'rejected');--> statement-breakpoint
 CREATE TYPE "public"."bounty_status" AS ENUM('open', 'claimed', 'completed', 'expired', 'cancelled');--> statement-breakpoint
 CREATE TYPE "public"."deliverable_type" AS ENUM('url', 'file', 'inline');--> statement-breakpoint
+CREATE TYPE "public"."dispute_entity_type" AS ENUM('assignment', 'task', 'gig_order');--> statement-breakpoint
 CREATE TYPE "public"."dispute_ruling" AS ENUM('pending', 'requester_wins', 'worker_wins', 'split', 'redo');--> statement-breakpoint
 CREATE TYPE "public"."escrow_ref_type" AS ENUM('job', 'task', 'gig_order', 'bounty_claim');--> statement-breakpoint
 CREATE TYPE "public"."escrow_status" AS ENUM('funded', 'released', 'refunded', 'disputed');--> statement-breakpoint
@@ -194,9 +195,8 @@ CREATE TABLE "dispute_panel_votes" (
 --> statement-breakpoint
 CREATE TABLE "disputes" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
-	"assignment_id" uuid,
-	"task_id" uuid,
-	"gig_order_id" uuid,
+	"entity_id" uuid NOT NULL,
+	"entity_type" "dispute_entity_type" NOT NULL,
 	"opener_agent_id" uuid NOT NULL,
 	"resolver_agent_id" uuid,
 	"panel_resolvers" jsonb,
@@ -224,7 +224,6 @@ CREATE TABLE "escrows" (
 	"id" uuid PRIMARY KEY DEFAULT gen_random_uuid() NOT NULL,
 	"ref_id" uuid NOT NULL,
 	"ref_type" "escrow_ref_type" NOT NULL,
-	"assignment_id" uuid,
 	"funder_agent_id" uuid NOT NULL,
 	"recipient_agent_id" uuid,
 	"amount" varchar(50) NOT NULL,
@@ -240,7 +239,6 @@ CREATE TABLE "escrows" (
 	"expires_at" timestamp,
 	"released_at" timestamp,
 	"refunded_at" timestamp,
-	CONSTRAINT "escrows_assignment_id_unique" UNIQUE("assignment_id"),
 	CONSTRAINT "uq_escrows_on_chain_tx" UNIQUE("on_chain_tx_hash")
 );
 --> statement-breakpoint
@@ -283,7 +281,6 @@ CREATE TABLE "gig_orders" (
 	"gig_id" uuid NOT NULL,
 	"buyer_agent_id" uuid NOT NULL,
 	"seller_agent_id" uuid NOT NULL,
-	"escrow_id" uuid,
 	"status" "gig_order_status" DEFAULT 'pending' NOT NULL,
 	"requirements" text,
 	"deliverable_type" "deliverable_type",
@@ -519,13 +516,9 @@ ALTER TABLE "dispute_evidence" ADD CONSTRAINT "dispute_evidence_dispute_id_dispu
 ALTER TABLE "dispute_evidence" ADD CONSTRAINT "dispute_evidence_submitter_agent_id_agents_id_fk" FOREIGN KEY ("submitter_agent_id") REFERENCES "public"."agents"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "dispute_panel_votes" ADD CONSTRAINT "dispute_panel_votes_dispute_id_disputes_id_fk" FOREIGN KEY ("dispute_id") REFERENCES "public"."disputes"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "dispute_panel_votes" ADD CONSTRAINT "dispute_panel_votes_voter_agent_id_agents_id_fk" FOREIGN KEY ("voter_agent_id") REFERENCES "public"."agents"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "disputes" ADD CONSTRAINT "disputes_assignment_id_assignments_id_fk" FOREIGN KEY ("assignment_id") REFERENCES "public"."assignments"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "disputes" ADD CONSTRAINT "disputes_task_id_tasks_id_fk" FOREIGN KEY ("task_id") REFERENCES "public"."tasks"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "disputes" ADD CONSTRAINT "disputes_gig_order_id_gig_orders_id_fk" FOREIGN KEY ("gig_order_id") REFERENCES "public"."gig_orders"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "disputes" ADD CONSTRAINT "disputes_opener_agent_id_agents_id_fk" FOREIGN KEY ("opener_agent_id") REFERENCES "public"."agents"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "disputes" ADD CONSTRAINT "disputes_resolver_agent_id_agents_id_fk" FOREIGN KEY ("resolver_agent_id") REFERENCES "public"."agents"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "escrow_milestones" ADD CONSTRAINT "escrow_milestones_escrow_id_escrows_id_fk" FOREIGN KEY ("escrow_id") REFERENCES "public"."escrows"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
-ALTER TABLE "escrows" ADD CONSTRAINT "escrows_assignment_id_assignments_id_fk" FOREIGN KEY ("assignment_id") REFERENCES "public"."assignments"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "escrows" ADD CONSTRAINT "escrows_funder_agent_id_agents_id_fk" FOREIGN KEY ("funder_agent_id") REFERENCES "public"."agents"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "escrows" ADD CONSTRAINT "escrows_recipient_agent_id_agents_id_fk" FOREIGN KEY ("recipient_agent_id") REFERENCES "public"."agents"("id") ON DELETE no action ON UPDATE no action;--> statement-breakpoint
 ALTER TABLE "favorite_agents" ADD CONSTRAINT "favorite_agents_agent_id_agents_id_fk" FOREIGN KEY ("agent_id") REFERENCES "public"."agents"("id") ON DELETE cascade ON UPDATE no action;--> statement-breakpoint
@@ -601,12 +594,9 @@ CREATE INDEX "idx_conversations_p1" ON "conversations" USING btree ("participant
 CREATE INDEX "idx_conversations_p2" ON "conversations" USING btree ("participant2_id");--> statement-breakpoint
 CREATE INDEX "idx_evidence_dispute" ON "dispute_evidence" USING btree ("dispute_id");--> statement-breakpoint
 CREATE INDEX "idx_panel_votes_dispute" ON "dispute_panel_votes" USING btree ("dispute_id");--> statement-breakpoint
-CREATE INDEX "idx_disputes_assignment" ON "disputes" USING btree ("assignment_id");--> statement-breakpoint
-CREATE INDEX "idx_disputes_task" ON "disputes" USING btree ("task_id");--> statement-breakpoint
-CREATE INDEX "idx_disputes_gig_order" ON "disputes" USING btree ("gig_order_id");--> statement-breakpoint
+CREATE INDEX "idx_disputes_entity" ON "disputes" USING btree ("entity_id","entity_type");--> statement-breakpoint
 CREATE INDEX "idx_milestones_escrow" ON "escrow_milestones" USING btree ("escrow_id");--> statement-breakpoint
 CREATE INDEX "idx_escrows_ref" ON "escrows" USING btree ("ref_id","ref_type");--> statement-breakpoint
-CREATE INDEX "idx_escrows_assignment" ON "escrows" USING btree ("assignment_id");--> statement-breakpoint
 CREATE INDEX "idx_escrows_status" ON "escrows" USING btree ("status");--> statement-breakpoint
 CREATE INDEX "idx_escrows_expires" ON "escrows" USING btree ("expires_at");--> statement-breakpoint
 CREATE INDEX "idx_favorites_agent" ON "favorite_agents" USING btree ("agent_id");--> statement-breakpoint

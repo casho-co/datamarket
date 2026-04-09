@@ -1,5 +1,5 @@
 {
-  "id": "8c74f27b-5938-4314-96d2-db3c77538001",
+  "id": "ece00838-6ea1-4fe1-b60f-1621fd09ee2f",
   "prevId": "00000000-0000-0000-0000-000000000000",
   "version": "7",
   "dialect": "postgresql",
@@ -1905,23 +1905,18 @@
           "notNull": true,
           "default": "gen_random_uuid()"
         },
-        "assignment_id": {
-          "name": "assignment_id",
+        "entity_id": {
+          "name": "entity_id",
           "type": "uuid",
           "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
-        "task_id": {
-          "name": "task_id",
-          "type": "uuid",
+        "entity_type": {
+          "name": "entity_type",
+          "type": "dispute_entity_type",
+          "typeSchema": "public",
           "primaryKey": false,
-          "notNull": false
-        },
-        "gig_order_id": {
-          "name": "gig_order_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
+          "notNull": true
         },
         "opener_agent_id": {
           "name": "opener_agent_id",
@@ -1989,41 +1984,17 @@
         }
       },
       "indexes": {
-        "idx_disputes_assignment": {
-          "name": "idx_disputes_assignment",
+        "idx_disputes_entity": {
+          "name": "idx_disputes_entity",
           "columns": [
             {
-              "expression": "assignment_id",
+              "expression": "entity_id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_disputes_task": {
-          "name": "idx_disputes_task",
-          "columns": [
+            },
             {
-              "expression": "task_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
-        "idx_disputes_gig_order": {
-          "name": "idx_disputes_gig_order",
-          "columns": [
-            {
-              "expression": "gig_order_id",
+              "expression": "entity_type",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -2036,45 +2007,6 @@
         }
       },
       "foreignKeys": {
-        "disputes_assignment_id_assignments_id_fk": {
-          "name": "disputes_assignment_id_assignments_id_fk",
-          "tableFrom": "disputes",
-          "tableTo": "assignments",
-          "columnsFrom": [
-            "assignment_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "disputes_task_id_tasks_id_fk": {
-          "name": "disputes_task_id_tasks_id_fk",
-          "tableFrom": "disputes",
-          "tableTo": "tasks",
-          "columnsFrom": [
-            "task_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
-        "disputes_gig_order_id_gig_orders_id_fk": {
-          "name": "disputes_gig_order_id_gig_orders_id_fk",
-          "tableFrom": "disputes",
-          "tableTo": "gig_orders",
-          "columnsFrom": [
-            "gig_order_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "disputes_opener_agent_id_agents_id_fk": {
           "name": "disputes_opener_agent_id_agents_id_fk",
           "tableFrom": "disputes",
@@ -2226,12 +2158,6 @@
           "primaryKey": false,
           "notNull": true
         },
-        "assignment_id": {
-          "name": "assignment_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
-        },
         "funder_agent_id": {
           "name": "funder_agent_id",
           "type": "uuid",
@@ -2348,21 +2274,6 @@
           "method": "btree",
           "with": {}
         },
-        "idx_escrows_assignment": {
-          "name": "idx_escrows_assignment",
-          "columns": [
-            {
-              "expression": "assignment_id",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        },
         "idx_escrows_status": {
           "name": "idx_escrows_status",
           "columns": [
@@ -2395,19 +2306,6 @@
         }
       },
       "foreignKeys": {
-        "escrows_assignment_id_assignments_id_fk": {
-          "name": "escrows_assignment_id_assignments_id_fk",
-          "tableFrom": "escrows",
-          "tableTo": "assignments",
-          "columnsFrom": [
-            "assignment_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "no action",
-          "onUpdate": "no action"
-        },
         "escrows_funder_agent_id_agents_id_fk": {
           "name": "escrows_funder_agent_id_agents_id_fk",
           "tableFrom": "escrows",
@@ -2437,13 +2335,6 @@
       },
       "compositePrimaryKeys": {},
       "uniqueConstraints": {
-        "escrows_assignment_id_unique": {
-          "name": "escrows_assignment_id_unique",
-          "nullsNotDistinct": false,
-          "columns": [
-            "assignment_id"
-          ]
-        },
         "uq_escrows_on_chain_tx": {
           "name": "uq_escrows_on_chain_tx",
           "nullsNotDistinct": false,
@@ -2921,12 +2812,6 @@
           "type": "uuid",
           "primaryKey": false,
           "notNull": true
-        },
-        "escrow_id": {
-          "name": "escrow_id",
-          "type": "uuid",
-          "primaryKey": false,
-          "notNull": false
         },
         "status": {
           "name": "status",
@@ -5252,6 +5137,15 @@
         "url",
         "file",
         "inline"
+      ]
+    },
+    "public.dispute_entity_type": {
+      "name": "dispute_entity_type",
+      "schema": "public",
+      "values": [
+        "assignment",
+        "task",
+        "gig_order"
       ]
     },
     "public.dispute_ruling": {

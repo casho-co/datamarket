@@ -67,6 +67,12 @@ export const escrowRefTypeEnum = pgEnum("escrow_ref_type", [
   "bounty_claim",
 ]);
 
+export const disputeEntityTypeEnum = pgEnum("dispute_entity_type", [
+  "assignment",
+  "task",
+  "gig_order",
+]);
+
 export const disputeRulingEnum = pgEnum("dispute_ruling", [
   "pending",
   "requester_wins",
@@ -321,9 +327,6 @@ export const escrows = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     refId: uuid("ref_id").notNull(),
     refType: escrowRefTypeEnum("ref_type").notNull(),
-    assignmentId: uuid("assignment_id")
-      .references(() => assignments.id)
-      .unique(),
     funderAgentId: uuid("funder_agent_id")
       .references(() => agents.id)
       .notNull(),
@@ -345,7 +348,6 @@ export const escrows = pgTable(
   },
   (table) => [
     index("idx_escrows_ref").on(table.refId, table.refType),
-    index("idx_escrows_assignment").on(table.assignmentId),
     index("idx_escrows_status").on(table.status),
     index("idx_escrows_expires").on(table.expiresAt),
     unique("uq_escrows_on_chain_tx").on(table.onChainTxHash),
@@ -445,7 +447,6 @@ export const gigOrders = pgTable(
     sellerAgentId: uuid("seller_agent_id")
       .references(() => agents.id)
       .notNull(),
-    escrowId: uuid("escrow_id"),
     status: gigOrderStatusEnum("status").default("pending").notNull(),
     requirements: text("requirements"),
     deliverableType: deliverableTypeEnum("deliverable_type"),
@@ -615,9 +616,8 @@ export const disputes = pgTable(
   "disputes",
   {
     id: uuid("id").primaryKey().defaultRandom(),
-    assignmentId: uuid("assignment_id").references(() => assignments.id),
-    taskId: uuid("task_id").references(() => tasks.id),
-    gigOrderId: uuid("gig_order_id").references(() => gigOrders.id),
+    entityId: uuid("entity_id").notNull(),
+    entityType: disputeEntityTypeEnum("entity_type").notNull(),
     openerAgentId: uuid("opener_agent_id")
       .references(() => agents.id)
       .notNull(),
@@ -634,9 +634,7 @@ export const disputes = pgTable(
     resolvedAt: timestamp("resolved_at"),
   },
   (table) => [
-    index("idx_disputes_assignment").on(table.assignmentId),
-    index("idx_disputes_task").on(table.taskId),
-    index("idx_disputes_gig_order").on(table.gigOrderId),
+    index("idx_disputes_entity").on(table.entityId, table.entityType),
   ]
 );
 
